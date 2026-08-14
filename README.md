@@ -39,4 +39,4 @@ For the full walkthrough with expected output at each step, see [docs/GETTING-ST
 
 ## Credentials
 
-Credentials live only in `.env` (gitignored) — never commit a real `AGENTIC_ADMIN_SECRET` or a raw KS token. `server/agent.json` (the provisioned resource IDs) is also gitignored; it's runtime state, not a secret, but it's specific to whichever intellect/agent/avatar you provisioned.
+Credentials live only in `.env` (gitignored) and, for CI, in GitHub's Environment/repository secrets — never commit a real `AGENTIC_ADMIN_SECRET` or a raw KS token. `server/agent.json` (the provisioned resource IDs) IS committed — it's runtime state, not a secret, and CI needs it on disk to redeploy the same live intellect/agent/avatar instead of minting new ones every run. See [docs/HOW-TO.md](docs/HOW-TO.md) for redeploying via GitHub Actions and setting up its secrets.

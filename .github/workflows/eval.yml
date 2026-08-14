@@ -1,0 +1,55 @@
+name: Eval Nova
+
+on:
+  workflow_run:
+    workflows: [Redeploy Nova]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: pass^k trial count (--trials)
+        default: '1'
+
+concurrency:
+  group: eval
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Check out the docs site (gh-pages-src)
+        uses: actions/checkout@v4
+        with:
+          repository: kaltura/intelligent-agents-sdk
+          ref: gh-pages-src
+          path: site
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Run the eval against the live agent
+        env:
+          AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
+          AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
+        run: node tests/eval/run.mjs --site-dir ./site --trials "${{ github.event.inputs.trials || '1' }}"
+
+      - name: Publish report to job summary
+        if: always()
+        run: cat tests/eval/artifacts/report.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts
+          path: tests/eval/artifacts/
+          retention-days: 30

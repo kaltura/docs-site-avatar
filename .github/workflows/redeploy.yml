@@ -1,0 +1,80 @@
+name: Redeploy Nova
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - server/provision.mjs
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: redeploy-production
+  cancel-in-progress: false
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the docs site (gh-pages-src)
+        uses: actions/checkout@v4
+        with:
+          repository: kaltura/intelligent-agents-sdk
+          ref: gh-pages-src
+          path: site
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Read existing resource ids from server/agent.json
+        id: ids
+        run: |
+          echo "config-id=$(node -pe "JSON.parse(require('fs').readFileSync('server/agent.json')).configId")" >> "$GITHUB_OUTPUT"
+          echo "agent-id=$(node -pe "JSON.parse(require('fs').readFileSync('server/agent.json')).agentId")" >> "$GITHUB_OUTPUT"
+          echo "avatar-id=$(node -pe "JSON.parse(require('fs').readFileSync('server/agent.json')).avatarId")" >> "$GITHUB_OUTPUT"
+
+      - name: Redeploy in place
+        env:
+          AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
+          AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
+        run: |
+          node server/provision.mjs \
+            --reuse "${{ steps.ids.outputs.config-id }}" \
+            --agent-id "${{ steps.ids.outputs.agent-id }}" \
+            --avatar-id "${{ steps.ids.outputs.avatar-id }}" \
+            --site-dir ./site
+
+      - name: Commit updated server/agent.json
+        run: |
+          if git diff --quiet server/agent.json; then
+            echo "agent.json unchanged"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add server/agent.json
+            git commit -m "Update server/agent.json after redeploy [skip ci]"
+            git push
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Redeploy summary"
+            echo "- configId: ${{ steps.ids.outputs.config-id }}"
+            echo "- agentId: ${{ steps.ids.outputs.agent-id }}"
+            echo "- avatarId: ${{ steps.ids.outputs.avatar-id }}"
+            echo ""
+            echo "Knowledge base stays **use_knowledge_base:'off'** until indexing is confirmed"
+            echo "(see docs/ARCHITECTURE.md). Check \`kaltura.knowledge.corpusStatus\` and flip it"
+            echo "on via \`intellects.update\` by hand once it reports indexed — this workflow"
+            echo "does not do that automatically."
+          } >> "$GITHUB_STEP_SUMMARY"

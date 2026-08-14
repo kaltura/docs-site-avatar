@@ -12,7 +12,9 @@
 | `scripts/fetch-sdk.mjs` | Vendors `@kaltura/intelligent-agents` from jsDelivr into `vendor/sdk/` |
 | `vendor/sdk/` | Gitignored — the fetched SDK source, populated by `postinstall` |
 | `server/provision.mjs` | Creates/redeploys/tears down Nova's live intellect, avatar, agent, knowledge base |
-| `server/agent.json` | Gitignored — the live resource IDs `provision.mjs` writes and every other command reads |
+| `server/agent.json` | Committed — the live resource IDs `provision.mjs` writes and every other command (incl. `redeploy.yml`) reads |
+| `.github/workflows/redeploy.yml` | CI: redeploy Nova in place, gated behind the `production` environment |
+| `.github/workflows/eval.yml` | CI: run the eval suite against whatever `redeploy.yml` most recently produced |
 | `docs/GETTING-STARTED.md` | Tutorial — zero to a passing eval run |
 | `docs/HOW-TO.md` | How-to guides — redeploy, tear down, extend |
 | `docs/ARCHITECTURE.md` | Explanation — why the repo and the eval harness are built this way |
@@ -75,6 +77,17 @@ Exits non-zero when `summary.healthy` is false (any release-blocking failure or 
 | `--tag vX.Y.Z` / `--tag=vX.Y.Z` | Vendor this tag instead of the default (`v1.0.1`) |
 | `SDK_TAG` | Same, read when `--tag` is omitted |
 | `--force` | Re-fetch even if `vendor/sdk/.sdk-tag` already matches the target tag |
+
+## GitHub Actions workflows
+
+See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why these are shaped this way, and [docs/HOW-TO.md](HOW-TO.md) for how to run/set them up.
+
+| Workflow | Trigger | Gate | Secrets read from |
+|---|---|---|---|
+| `redeploy.yml` | Push to `server/provision.mjs` on `main`; `workflow_dispatch` | `production` environment, required reviewers | `production` environment secrets |
+| `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` with a `trials` input | None | Repository secrets |
+
+Both need `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET` defined in whichever secrets scope they read from — see HOW-TO.md's "Set up this repo's CI secrets."
 
 ## Environment variables
 

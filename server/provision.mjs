@@ -17,7 +17,10 @@
  * tell the truth about whether she actually navigated or pointed at
  * something, rather than a prompt-only promise she might not keep. Both
  * tools are idempotently upserted by name (see upsertClientTool below),
- * mirroring earnings-avatar-q2's upsertToolFromList pattern.
+ * mirroring earnings-avatar-q2's upsertToolFromList pattern. A `--reuse` run
+ * deletes the PREVIOUS knowledge category/record/entries (see deleteKnowledge)
+ * before wireKnowledge mints a new one, so repeated redeploys (e.g. from CI)
+ * don't orphan a fresh corpus on every run.
  *
  * Run:  AGENTIC_PARTNER_ID=… AGENTIC_ADMIN_SECRET=… node server/provision.mjs
  *       [--site-dir <path>]                  # read the docs site's src/**\/*.md from
@@ -166,6 +169,8 @@ async function provision() {
   const admin = await kaltura.sessions.createAdminToken();
   console.log('✓ admin token');
 
+  const prevSaved = JSON.parse(await readFile(OUT, 'utf8').catch(() => '{}'));
+
   if (!existingAgentId) {
     const existingAgents = await kaltura.agents.list(admin).all();
     const collisions = existingAgents.filter((a) => a.adminTags?.includes(TAG) && a.displayName !== DISPLAY_NAME);
@@ -177,6 +182,15 @@ async function provision() {
 
   const docs = await loadDocs(siteDir);
   console.log(`✓ found ${docs.length} docs under ${siteDir}`);
+
+  // Redeploying the SAME intellect would otherwise orphan its previous knowledge
+  // category/record/entries — wireKnowledge below always mints a fresh one, and once this
+  // run's ids overwrite agent.json, cleanup can no longer find the old ones. Only tear down
+  // when prevSaved really is a snapshot of the intellect being reused, not stale/unrelated state.
+  if (reuseConfigId && prevSaved.configId === reuseConfigId && (prevSaved.knowledgeRecordId || prevSaved.knowledgeCategoryId)) {
+    console.log('✓ removing previous knowledge corpus before re-upload (avoids orphaning it)');
+    await deleteKnowledge(admin, prevSaved);
+  }
 
   const { categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, siteDir, docs);
 
@@ -302,8 +316,7 @@ async function provision() {
     }, admin);
     agentId = existingAgentId;
     console.log('✓ updated existing agent', agentId);
-    const saved = JSON.parse(await readFile(OUT, 'utf8').catch(() => '{}'));
-    widgetId = saved.widgetId || (await kaltura.application.resolveWidgetId(agentId, admin)).widgetId;
+    widgetId = prevSaved.widgetId || (await kaltura.application.resolveWidgetId(agentId, admin)).widgetId;
   } else {
     const agent = await kaltura.agents.create({
       displayName: DISPLAY_NAME,
@@ -375,6 +388,30 @@ async function wireKnowledge(admin, siteDir, docs) {
   return { categoryId: category.id, recordId: record.id, entryIds };
 }
 
+/**
+ * Delete one knowledge record + its category + every entry uploaded into it — the exact
+ * teardown `cleanup()` already did for the CURRENTLY saved corpus, factored out so `provision()`
+ * can run the same teardown on the PREVIOUS corpus before `wireKnowledge()` mints a new one.
+ * Without this, every `--reuse` redeploy would silently orphan the prior category/record/entries
+ * (each replaced in agent.json, so cleanup can no longer even find them afterward).
+ */
+async function deleteKnowledge(admin, { knowledgeRecordId, knowledgeCategoryId, knowledgeEntryIds } = {}) {
+  if (knowledgeRecordId) {
+    await kaltura.knowledge.deleteRecord(knowledgeRecordId, admin, { confirmPermanent: true }).catch((e) => console.error('knowledge-record', e.code));
+  }
+  if (knowledgeCategoryId) {
+    const calls = (knowledgeEntryIds || []).map((entryId) => ({ service: 'baseentry', action: 'delete', entryId }));
+    calls.push({ service: 'category', action: 'delete', id: knowledgeCategoryId });
+    const body = { apiVersion: '19.14.0', format: 1 };
+    calls.forEach((c, i) => { body[i] = { ks: admin.ks, ...c }; });
+    try {
+      await fetch('https://www.kaltura.com/api_v3/service/multirequest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+    } catch (e) { console.error('knowledge-category', knowledgeCategoryId, e.message); }
+  }
+}
+
 const CLEANUP_TARGETS = ['agent', 'avatar', 'intellect', 'knowledge'];
 
 /** @param {{dryRun?:boolean, only?:string[]}} [opts] */
@@ -402,26 +439,20 @@ async function cleanup(opts = {}) {
     if (dryRun) log(`intellect:${saved.configId}`);
     else await kaltura.intellects.delete(Number(saved.configId), admin, { confirmPermanent: true }).then(() => log('intellect')).catch((e) => console.error('intellect', e.code));
   }
-  if (wants('knowledge') && saved.knowledgeRecordId) {
-    if (dryRun) log(`knowledge-record:${saved.knowledgeRecordId}`);
-    else await kaltura.knowledge.deleteRecord(saved.knowledgeRecordId, admin, { confirmPermanent: true }).then(() => log(`knowledge-record:${saved.knowledgeRecordId}`)).catch((e) => console.error('knowledge-record', e.code));
-  }
-  if (wants('knowledge') && saved.knowledgeCategoryId) {
+  if (wants('knowledge') && (saved.knowledgeRecordId || saved.knowledgeCategoryId)) {
     if (dryRun) {
-      log(`knowledge-category:${saved.knowledgeCategoryId}`);
-      (saved.knowledgeEntryIds || []).forEach((id) => log(`knowledge-entry:${id}`));
-    } else {
-      const calls = (saved.knowledgeEntryIds || []).map((entryId) => ({ service: 'baseentry', action: 'delete', entryId }));
-      calls.push({ service: 'category', action: 'delete', id: saved.knowledgeCategoryId });
-      const body = { apiVersion: '19.14.0', format: 1 };
-      calls.forEach((c, i) => { body[i] = { ks: admin.ks, ...c }; });
-      try {
-        await fetch('https://www.kaltura.com/api_v3/service/multirequest', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        });
+      if (saved.knowledgeRecordId) log(`knowledge-record:${saved.knowledgeRecordId}`);
+      if (saved.knowledgeCategoryId) {
         log(`knowledge-category:${saved.knowledgeCategoryId}`);
         (saved.knowledgeEntryIds || []).forEach((id) => log(`knowledge-entry:${id}`));
-      } catch (e) { console.error('knowledge-category', saved.knowledgeCategoryId, e.message); }
+      }
+    } else {
+      await deleteKnowledge(admin, saved);
+      if (saved.knowledgeRecordId) log(`knowledge-record:${saved.knowledgeRecordId}`);
+      if (saved.knowledgeCategoryId) {
+        log(`knowledge-category:${saved.knowledgeCategoryId}`);
+        (saved.knowledgeEntryIds || []).forEach((id) => log(`knowledge-entry:${id}`));
+      }
     }
   }
   console.log(dryRun ? '(dry run) would clean up:' : '✓ cleaned up:', deleted.join(', ') || 'nothing');

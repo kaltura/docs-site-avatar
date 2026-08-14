@@ -12,6 +12,23 @@ node server/provision.mjs --reuse <configId> --agent-id <agentId>
 
 Take `<configId>` and `<agentId>` from your existing `server/agent.json`. Add `--avatar-id <existingAvatarId>` to keep the current avatar too instead of creating a new one. `navigate_to_page` and `highlight_element` are upserted by name — if another intellect also references one of them, provision.mjs warns and reuses its id without overwriting its config, rather than changing a tool out from under that other intellect.
 
+## Redeploy Nova via GitHub Actions
+
+Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` on `main`. Either way, the job waits for a required reviewer on the `production` environment before it runs `provision.mjs --reuse` against the ids in `server/agent.json`, then commits that file back if anything changed. See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why the environment gate exists and why the docs site's own deploy doesn't trigger this automatically.
+
+Approve the pending deployment from the run's page (or the notification GitHub sends the reviewers) — the run stays queued until someone does.
+
+## Run the eval suite in CI
+
+`eval.yml` runs automatically after every successful `redeploy.yml` run. To run it ad hoc — a pass^k reliability check without redeploying first, say — go to **Actions → Eval Nova → Run workflow** and set `trials`. The report and the full `tests/eval/artifacts/` directory are attached to the run (job summary plus a 30-day build artifact), the same outputs a local `npm run eval` writes to disk.
+
+## Set up this repo's CI secrets (one-time)
+
+Both workflows need `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET`, in two different places, because only one of them is gated:
+
+1. In Settings → Environments, create an environment named `production`, add both as environment secrets, and add required reviewers.
+2. In Settings → Secrets and variables → Actions, add the same two values again as repository secrets — `eval.yml` reads from here since it deliberately isn't gated by the environment.
+
 ## Point at a different site checkout
 
 ```bash
