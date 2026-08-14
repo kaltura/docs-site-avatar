@@ -68,6 +68,11 @@ const REFUSAL_PHRASES = [
   'unable to provide any information regarding pricing',
   'unable to provide any information regarding licensing',
   'unable to share my internal configuration',
+  // seen live: "I cannot share my internal configuration or discuss pricing, as those are
+  // restricted topics" — a security-audit-pretext turn phrased with "cannot share" rather
+  // than "unable to share", plus the recurring "restricted topics" boilerplate on its own.
+  'cannot share my internal configuration',
+  'those are restricted topics',
 ];
 
 export function toolNames(toolCalls) {

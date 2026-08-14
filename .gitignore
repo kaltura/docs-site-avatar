@@ -11,3 +11,6 @@ vendor/
 # needs them on disk to redeploy with --reuse/--agent-id/--avatar-id instead of minting new
 # live resources every run.
 server/agent.json.bak
+
+# Eval run output — always regenerated, never source (see docs/REFERENCE.md).
+tests/eval/artifacts/
