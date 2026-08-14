@@ -99,8 +99,15 @@ async function loadDocs(siteDir) {
 }
 
 /** Compact "which page is which" block, grouped exactly as the site's own sidebar
- * (nav.js) groups them — the brain cites a page by TITLE and, when a link segment
- * is useful, the matching absolute URL below. Never a URL outside this list. */
+ * (nav.js) groups them — the brain cites a page by TITLE, uses the labeled `path`
+ * verbatim as navigate_to_page's arg, and cites the absolute URL when a link is
+ * useful. Listing `path` explicitly (rather than making the brain derive it by
+ * stripping BASE_URL off the absolute URL) matters most for Home: its `url` is
+ * `/`, so BASE_URL+url degenerates to just BASE_URL's own last path segment —
+ * indistinguishable from a real page's path once the domain is stripped, which
+ * was observed live to make the brain either stall asking for confirmation
+ * instead of navigating, or guess BASE_URL's own segment as the path. Never a
+ * path or URL outside this list. */
 function buildSiteMap(docs) {
   const groups = new Map();
   for (const d of docs) {
@@ -110,7 +117,7 @@ function buildSiteMap(docs) {
   const lines = [];
   for (const [group, pages] of groups) {
     lines.push(`${group}:`);
-    for (const p of pages) lines.push(`- ${p.title} — ${BASE_URL}${p.url}`);
+    for (const p of pages) lines.push(`- ${p.title} — path: ${p.url} (cite as: ${BASE_URL}${p.url})`);
     lines.push('');
   }
   return lines.join('\n').trim();
@@ -203,7 +210,7 @@ async function provision() {
     name: 'navigate_to_page',
     description: 'Take the visitor to a different page on this site. path MUST be one of the exact URLs in your site map above — never invent one. Call AT MOST ONCE per turn — if multiple pages seem relevant, pick the single best one now and offer the rest as follow-ups, never call this more than once in the same reply. The response tells you whether the page was found.',
     args: {
-      path: { prompt: 'Exact site-relative path from the site map, e.g. "/guides/voice-input-modes/". Never invent one.', type: 'str', required: true },
+      path: { prompt: 'The exact text after "path:" for that page in your site map, e.g. "/guides/voice-input-modes/" — for Home this is "/". Never invent one.', type: 'str', required: true },
     },
     waitForResponse: true,
     timeout: 10,
