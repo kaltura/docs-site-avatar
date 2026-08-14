@@ -1,0 +1,20 @@
+{
+  "name": "@kaltura/docs-site-avatar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Nova — the live SDK docs assistant embedded on the @kaltura/intelligent-agents GitHub Pages site. Pulls the SDK itself from jsDelivr at a pinned tag (see scripts/fetch-sdk.mjs) rather than a local sibling checkout.",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "scripts": {
+    "postinstall": "node scripts/fetch-sdk.mjs",
+    "fetch-sdk": "node scripts/fetch-sdk.mjs --force",
+    "provision": "node server/provision.mjs",
+    "cleanup": "node server/provision.mjs --cleanup",
+    "test:eval:unit": "node --test tests/eval/probes.test.mjs",
+    "eval": "node tests/eval/run.mjs",
+    "eval:dashboard": "node tests/eval/dashboard/server.mjs"
+  }
+}

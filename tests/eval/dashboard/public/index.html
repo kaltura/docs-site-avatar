@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Nova Eval Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>Nova Eval Dashboard</h1>
+  <span id="meta-line" class="meta-line">loading…</span>
+  <span id="status-pill" class="pill pill-idle">idle</span>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn active" data-tab="run">Run &amp; Live Results</button>
+  <button class="tab-btn" data-tab="history">History &amp; Trends</button>
+  <button class="tab-btn" data-tab="personas">Personas</button>
+  <button class="tab-btn" data-tab="quick">Quick Test</button>
+  <button class="tab-btn" data-tab="judge">Judge</button>
+</nav>
+
+<main>
+  <section id="tab-run" class="tab-panel active">
+    <div class="run-controls">
+      <div id="persona-checks" class="persona-checks">loading personas…</div>
+      <div class="run-buttons">
+        <label class="trials-control" for="trials-input" title="Re-run every selected persona this many independent times and gate release-blocking dimensions on pass^k (all trials must pass).">
+          Trials
+          <input id="trials-input" type="number" min="1" max="10" step="1" value="1" />
+        </label>
+        <button id="btn-run-all" class="btn btn-primary">Run Full Suite</button>
+        <button id="btn-run-selected" class="btn">Run Selected Only</button>
+        <button id="btn-select-all">select all</button>
+        <button id="btn-select-none">select none</button>
+      </div>
+    </div>
+    <div id="progress-wrap" class="progress-wrap" hidden>
+      <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+      <span id="progress-label"></span>
+    </div>
+    <div id="live-log" class="live-log"></div>
+    <div id="run-summary" class="summary-card" hidden></div>
+  </section>
+
+  <section id="tab-history" class="tab-panel">
+    <div class="history-layout">
+      <div id="history-list" class="history-list">loading history…</div>
+      <div id="history-detail" class="history-detail">
+        <p class="hint">Select a run from the list to see its full report.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-personas" class="tab-panel">
+    <p class="hint">Read-only inventory of every persona/turn the suite exercises, built live from the site checkout — edit <code>tests/eval/personas.mjs</code> to change what's tested. Use the Quick Test tab to iterate on a single prompt without touching that file.</p>
+    <div id="personas-browser" class="personas-browser">loading…</div>
+  </section>
+
+  <section id="tab-quick" class="tab-panel">
+    <p class="hint">Runs one turn against the live agent on a fresh thread, scored the same way the full suite scores every turn — for rapid iteration on prompt wording or probe behavior without a 44-turn run.</p>
+    <div class="quick-form">
+      <label for="quick-prompt">Prompt</label>
+      <textarea id="quick-prompt" rows="3" placeholder="Can you highlight the code example on this page for me?"></textarea>
+      <label for="quick-expectation">Expectation (optional JSON — e.g. {&quot;expectTools&quot;:[&quot;navigate_to_page&quot;],&quot;expectNavPath&quot;:&quot;/getting-started/&quot;})</label>
+      <textarea id="quick-expectation" rows="2" placeholder="{}"></textarea>
+      <label class="quick-checkbox-row" for="quick-simulate-highlight">
+        <input type="checkbox" id="quick-simulate-highlight" />
+        Simulate a real highlight_element success ack (exercises the success-narration probe)
+      </label>
+      <input id="quick-simulate-highlight-label" type="text" placeholder="Label the ack should carry, e.g. &quot;that code example&quot; (optional, defaults to &quot;that&quot;)" />
+      <button id="btn-quick-run" class="btn btn-primary">Run Turn</button>
+    </div>
+    <div id="quick-result" class="quick-result"></div>
+  </section>
+
+  <section id="tab-judge" class="tab-panel">
+    <p class="hint">Nova's own backend can't neutrally judge itself, so the harness never calls an LLM judge in-process. Copy the prompt below (built from the latest <code>transcript.json</code>) into any capable model, then paste its JSON verdicts back in to fold them into the report as a qualitative layer alongside the deterministic probes. See <code>tests/eval/GUIDELINES.md</code> for the rubric and calibration guidance.</p>
+    <div class="judge-panel">
+      <div class="judge-col">
+        <div class="judge-col-header">
+          <span>1. Judge prompt</span>
+          <button id="btn-judge-refresh" class="btn">Refresh</button>
+          <button id="btn-judge-copy" class="btn">Copy</button>
+        </div>
+        <textarea id="judge-prompt" rows="16" readonly placeholder="Run the eval at least once, then click Refresh."></textarea>
+      </div>
+      <div class="judge-col">
+        <div class="judge-col-header">
+          <span>2. Paste verdicts JSON &amp; import</span>
+          <button id="btn-judge-import" class="btn btn-primary">Import</button>
+        </div>
+        <textarea id="judge-verdicts" rows="16" placeholder='[{"personaId": "...", "prompt": "...", "completeness": "yes", ...}]'></textarea>
+      </div>
+    </div>
+    <div id="judge-result" class="quick-result"></div>
+    <div id="judge-summary" class="summary-card" hidden></div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
