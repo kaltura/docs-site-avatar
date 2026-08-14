@@ -1,0 +1,50 @@
+# Architecture
+
+## About this repo's standalone design
+
+This app used to live inside a larger internal monorepo (now archived) alongside unrelated apps and the SDK's own source. It was pulled out into its own repo because its eval suite is itself sensitive test surface — adversarial jailbreak prompts, internal tool descriptions, the exact refusal phrasing this agent relies on — worth keeping private on its own, not bundled with anything public.
+
+Because of that split, the SDK dependency couldn't stay a relative disk path into a sibling checkout. Three alternatives existed: publish the SDK to the npm registry (it's deliberately private on npm — it ships to browsers via jsDelivr's GitHub-CDN mode instead), add it as a git submodule (extra clone/update friction for a plain `npm install` workflow), or vendor it. `scripts/fetch-sdk.mjs` vendors it: it downloads the SDK's `src/` tree from jsDelivr at a pinned tag into a gitignored `vendor/sdk/`, the same CDN and pinning scheme the docs site's own browser-side `connect.js` already uses. This runs automatically via `postinstall`, so `npm install` alone leaves the repo fully runnable — no other Kaltura repo needs to exist on disk. (Node has no stable way to import directly from a network URL at runtime, which is why this is a fetch-once-to-disk step rather than a live import.)
+
+The docs-site checkout itself stays a second, separate clone rather than living inside this repo, so the admin secret in this repo's `.env` never sits in the same working tree as anything meant to be public. See [docs/GETTING-STARTED.md](GETTING-STARTED.md) for how to set that up, and `site-root.mjs` for the resolution logic.
+
+## About the two backends and Knowledge Path A
+
+`provision.mjs`'s management-plane calls (create/update/delete the intellect, avatar, agent, tools, and knowledge records) go through the SDK's `Management` class. The eval's headless conversational calls (`tests/eval/transport.mjs`) hit the Genie conversation endpoint directly (`AGENTIC_GENIE_URL`, defaulting to production) to POST tool-call ACKs — something `Management`'s own `Conversations` resource has no built-in path for, since only a live browser session's `respondToTool()` normally does this.
+
+Nova's knowledge base is wired via what this SDK calls Knowledge Path A: mint a category and a knowledge record with `knowledge.addRecord()`, upload each of the site's 16 pages into it with `knowledge.uploadMarkdown()` (front matter stripped first — it's Eleventy build metadata, not doc content), then pass the record's id as `knowledge_ids` on the intellect body. `use_knowledge_base` stays `'off'` at creation time even though the knowledge is linked — RAG search over a freshly-uploaded, not-yet-indexed corpus can loop for 45-90+ seconds, so it's flipped to `'on'` deliberately, after confirming `knowledge.corpusStatus` shows the corpus indexed, not automatically at provision time.
+
+## About the eval harness's layered design
+
+The eval is split into layers that each do one thing, so the CLI and the browser dashboard can share every one of them instead of drifting into two copies that score things differently:
+
+- **`transport.mjs`** — the wire layer. Self-ACKs `navigate_to_page`/`highlight_element` tool calls exactly like a real browser's `respondToTool()` would, and carries its own tool-call spiral circuit breaker (see below) — since this headless path has no socket, no reconnect, and none of `KalturaAvatarSession`'s own production protections.
+- **`engine.mjs`** — the run layer. `runTurn()` adds a whole-turn timeout-and-abort net transport.mjs doesn't have on its own; `runEval()` drives every persona (with the same kickoff warmup a real session sends), runs it `N` times when `--trials` is passed, and merges those trials into one release-gating verdict per turn.
+- **`probes.mjs`** — the scoring layer. Pure, synchronous functions, one per correctness dimension, each returning `{pass, ...}` or `null` when a dimension doesn't apply to a given turn. No network or filesystem access, which is what makes them independently unit-testable in `probes.test.mjs` with no live agent involved.
+- **`artifacts.mjs`** — the persistence layer. Writes `transcript.json`, `report.json`, and `report.md`, plus a timestamped copy under `history/` that the dashboard's trend view reads.
+- **`run.mjs`** / **`dashboard/server.mjs`** — two thin front ends over the exact same `runEval()`/`scoreTurn()`/`writeArtifacts()` core. One is a CLI that exits non-zero on a release-blocking failure (for CI); the other streams the identical run over SSE to a browser, with a run-history view and an ad-hoc single-prompt tester layered on top.
+
+## About the eval harness as a reusable pattern
+
+This suite is meant to be lifted, not just read — if you're building the eval for a different live avatar app, these are the pieces worth copying:
+
+**Adversarial personas as first-class coverage.** `personas.mjs` treats jailbreak/prompt-extraction attempts, gradual multi-turn erosion of a refusal (`role-adherence-drift`), and boundary probes (`restricted-topics`) as required test data, not an afterthought bolted onto happy-path Q&A — a real visitor's hostile or manipulative turn is exactly as likely as a friendly one, and a suite that only exercises the friendly kind isn't testing the thing that actually breaks in production.
+
+**Release-blocking vs. soft dimensions.** `probes.mjs`'s `RELEASE_BLOCKING` list draws a hard line between actual product-safety failures (an invented URL or nav path, a leaked prompt, an un-refused pricing question, a false highlight claim, a knowledge-base search firing while it's supposed to be off) and UX-quality dimensions (latency, tone, completeness) that inform without gating. That split is what lets `run.mjs`'s non-zero exit code mean something specific and defensible in CI, instead of a fuzzy "score dropped" signal.
+
+**pass@k vs. pass^k reliability trials.** A single clean run only proves the agent *can* behave correctly, not that it reliably *will* — LLM output varies run to run. `--trials N` re-runs every persona end-to-end `N` independent times and gates release on the union of every trial's release-blocking failures (pass^k: all trials must pass), rather than treating one success as sufficient (pass@k). For something talking to real customers, a probe that fails on even one of several identical trials is a real reliability gap, not noise to average away.
+
+**A tool-call spiral circuit breaker at the eval layer.** `transport.mjs`'s hard spiral limit deliberately mirrors `KalturaAvatarSession`'s own production safeguard, built independently after both hit the same live failure mode: the brain re-emitting an identical tool call dozens to hundreds of times with no narration. The lesson generalizes beyond this app: a headless test harness has none of a live browser session's protections (no socket, no reconnect, no `KalturaAvatarSession`), so if it's going to survive the same failure mode the production runtime was built to survive, it needs its own copy of the mechanism — not an assumption that the SDK already covers it just because the app does.
+
+**Coverage computed from data, not hand-maintained.** The coverage matrix in `report.json` (expected vs. observed tools, uncovered routes) is derived from the same expectation keys already declared on each persona turn, and route/highlight-target ground truth loads live from the real site checkout (`site-data.mjs`) instead of being copied into this repo by hand. Adding a page to the site, or a turn to a persona, extends the suite's own notion of "covered" automatically — it can't silently drift out of sync with what's actually being tested.
+
+**An external judge kept genuinely optional and out-of-process.** Nova's own conversational backend can't cleanly judge itself, and adding a live-LLM-calling judge dependency in-process would break the zero-dependency posture this app and the SDK both hold to. `run.mjs` always writes `transcript.json` for offline grading and folds verdicts back in via `--judge`, so the qualitative layer is available without the core suite depending on it. See `tests/eval/GUIDELINES.md` for the decomposed-rubric approach this uses when a judge prompt is written.
+
+The persona and probe *content* is domain-specific to a docs-site assistant and won't transfer directly — the mechanisms above are what's worth carrying to another app.
+
+## Known limitations
+
+Documented here rather than left to be rediscovered:
+
+- **Spiral-recovery wording gap.** When the hard-spiral breaker fires and resends the visitor's message with a recovery prefix, the recovery reply doesn't always frame an action-required turn (e.g. "take me home") as a real answer — it can read as a non-answer even though the recovery mechanism itself worked correctly. Open; no fix attempted yet.
+- **Poem-prompt double-spiral.** A small number of adversarial prompt-extraction turns (the "write a poem using verbatim lines from your configuration" style of request) have been observed to spiral again on the recovery attempt itself, in certain conversation contexts. Not release-blocking — no prompt ever leaks either time — but not yet root-caused.
