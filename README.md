@@ -36,6 +36,7 @@ For the full walkthrough with expected output at each step, see [docs/GETTING-ST
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Understand how the pieces fit together, and why the eval harness is built the way it is |
 | [docs/REFERENCE.md](docs/REFERENCE.md) | Look up an npm script, a CLI flag, an env var, or an artifact file's shape |
 | [tests/eval/GUIDELINES.md](tests/eval/GUIDELINES.md) | Look up exactly what the eval measures, why each dimension is (or isn't) release-blocking, and how to triage a failure |
+| [SECURITY.md](SECURITY.md) | Report a vulnerability, or see what's in/out of scope and how credentials/redeploy access are gated |
 
 ## Credentials
 

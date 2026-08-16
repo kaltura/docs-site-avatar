@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # This repo has no runtime dependencies of its own but does carry devDependency/
+  # transitive entries in package-lock.json (and any future devDependencies) — keep
+  # those current.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # CI workflows pin GitHub Actions by floating tag (@v4) — Dependabot keeps those
+  # current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

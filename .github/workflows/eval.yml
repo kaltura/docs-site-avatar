@@ -19,6 +19,8 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +43,8 @@ jobs:
         env:
           AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
           AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
-        run: node tests/eval/run.mjs --site-dir ./site --trials "${{ github.event.inputs.trials || '1' }}"
+          TRIALS: ${{ github.event.inputs.trials || '1' }}
+        run: node tests/eval/run.mjs --site-dir ./site --trials "$TRIALS"
 
       - name: Publish report to job summary
         if: always()
