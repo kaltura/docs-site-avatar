@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: write
-  administration: write
+  pull-requests: write
 
 concurrency:
   group: redeploy-production
@@ -53,7 +53,7 @@ jobs:
             --avatar-id "${{ steps.ids.outputs.avatar-id }}" \
             --site-dir ./site
 
-      - name: Commit updated server/agent.json
+      - name: Open a PR with the updated server/agent.json
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -61,23 +61,21 @@ jobs:
             echo "agent.json unchanged"
             exit 0
           fi
+          # main requires a PR + review for everyone, including this bot's own
+          # GITHUB_TOKEN — it has no branch-protection-admin permission (nor
+          # should it). Push the change to a new branch and open a PR instead
+          # of pushing to main directly; a human merges it, same as any other
+          # main-branch change.
+          BRANCH="redeploy/agent-json-$(date -u +%Y%m%dT%H%M%SZ)"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
           git add server/agent.json
           git commit -m "Update server/agent.json after redeploy [skip ci]"
-          # main requires a PR + review for everyone, including this bot. This one
-          # commit is metadata-only (ids, no secrets) and only runs after a human
-          # already approved this redeploy via the production environment gate, so
-          # lift enforce_admins just long enough to push it, then restore it.
-          gh api -X DELETE "repos/${{ github.repository }}/branches/main/protection/enforce_admins"
-          git push
-          gh api -X POST "repos/${{ github.repository }}/branches/main/protection/enforce_admins"
-
-      - name: Restore branch protection if the commit step failed mid-way
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api -X POST "repos/${{ github.repository }}/branches/main/protection/enforce_admins"
+          git push -u origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Sync server/agent.json after redeploy" \
+            --body "Automated: server/agent.json changed after this run's redeploy. Merge to keep main in sync with the live agent."
 
       - name: Summary
         if: always()
