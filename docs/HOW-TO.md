@@ -20,14 +20,21 @@ Approve the pending deployment from the run's page (or the notification GitHub s
 
 ## Run the eval suite in CI
 
-`eval.yml` runs automatically after every successful `redeploy.yml` run. To run it ad hoc — a pass^k reliability check without redeploying first, say — go to **Actions → Eval Nova → Run workflow** and set `trials`. The report and the full `tests/eval/artifacts/` directory are attached to the run (job summary plus a 30-day build artifact), the same outputs a local `npm run eval` writes to disk.
+`eval.yml` is queued automatically when `redeploy.yml` completes successfully (`workflow_run`). But it's scoped to the `production` environment just like `redeploy.yml` is, so "runs automatically" means "gets queued automatically" — it still waits for a required reviewer to approve the run (same page/notification as approving a redeploy) before it can read `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET` and actually execute. To run it ad hoc — a pass^k reliability check without redeploying first, say — go to **Actions → Eval Nova → Run workflow** and set `trials`; that run needs the same approval. The report and the full `tests/eval/artifacts/` directory are attached to the run (job summary plus a 30-day build artifact), the same outputs a local `npm run eval` writes to disk.
+
+## Validate a provision.mjs change before merge
+
+`ci.yml` runs on every pull request against `main` — including from forks — and needs no secrets: it checks `server/provision.mjs` parses (`node --check`), runs the offline probe unit tests (`npm run test:eval:unit`), and scans every git-tracked file for leaked-secret patterns (`node scripts/scan-secrets.mjs`). It never calls the live agent or provisions anything; it exists to catch a broken `provision.mjs` or an accidentally-committed credential before the change can reach `redeploy.yml`'s production path.
 
 ## Set up this repo's CI secrets (one-time)
 
-Both workflows need `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET`, in two different places, because only one of them is gated:
+`redeploy.yml` and `eval.yml` both read `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET` from the same GitHub Environment, `production` — there's one place to set these, not two:
 
-1. In Settings → Environments, create an environment named `production`, add both as environment secrets, and add required reviewers.
-2. In Settings → Secrets and variables → Actions, add the same two values again as repository secrets — `eval.yml` reads from here since it deliberately isn't gated by the environment.
+1. In Settings → Environments, create (or reuse) an environment named `production`.
+2. Add both values as environment secrets on `production`.
+3. Add required reviewers to `production`. Every job scoped to it — both workflows — queues and waits for one of those reviewers to approve, whether the trigger was a push, a `workflow_run`, or a manual `workflow_dispatch`.
+
+`ci.yml` needs none of this: it runs on every PR without secrets (see "Validate a provision.mjs change before merge" above).
 
 ## Point at a different site checkout
 

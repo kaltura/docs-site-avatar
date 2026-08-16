@@ -1,0 +1,38 @@
+name: CI
+
+# Runs on every PR against main so a change to server/provision.mjs (or
+# anything else) is validated before it can reach redeploy.yml's production
+# path. Deliberately `pull_request`, not `pull_request_target` — this must
+# run safely on first-time-contributor/fork PRs with the PR's own code and
+# without any repo secrets, so nothing here references ${{ secrets.* }}.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Sanity-check server/provision.mjs parses
+        run: node --check server/provision.mjs
+
+      - name: Run offline eval-probe unit tests
+        run: npm run test:eval:unit
+
+      - name: Secret-leak scan (all tracked files, including test/tests dirs)
+        run: node scripts/scan-secrets.mjs

@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = 'kaltura/intelligent-agents-sdk';
 const SRC_SUBTREE = 'src';
+// SDK version pin -- keep in sync with: intelligent-agents-sdk-site/src/assets/nova/connect.js
+// (SDK_TAG constant) and intelligent-agents-sdk-site/src/index.md (quick-start jsDelivr pin).
 const DEFAULT_TAG = 'v1.0.1';
 const DEST_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'vendor', 'sdk');
 

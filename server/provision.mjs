@@ -295,6 +295,40 @@ async function provision() {
     console.log('✓ created intellect', configId);
   }
 
+  // Abuse control (N5 — no rate limit today on Nova's public/anonymous
+  // sessions; createWidgetToken mints anonymous access, so anonymousRateLimits
+  // is the applicable knob, not rateLimits, which gates authenticated KSes).
+  // Values are a conservative placeholder, not a tuned figure: 30/min · 500/hr
+  // partner-wide for ALL anonymous traffic combined (not per-visitor). That's
+  // the ratio the SDK's own API-REFERENCE.md § Configure the Brain example
+  // uses for the authed rateLimits knob (60/min · 1000/hr), halved because
+  // anonymous traffic carries no per-user accountability. 30/min comfortably
+  // covers a docs-widget's realistic concurrent-visitor load (a handful of
+  // simultaneous conversations, one brain call per turn) while capping a
+  // scripted flood well below a cost-impacting spike; 500/hr caps sustained
+  // abuse at a lower average (~8/min) than the burst ceiling allows.
+  //
+  // anonymousRateLimits/rateLimits ARE the SDK's "Class A" fields — confirmed
+  // round-trip-verified, unlike the Class B set (agentAvatarLlm/runQuotaCheck/
+  // webSearch), which intellects.js marks UNVERIFIED and this code does NOT
+  // touch. But the WRITE door they share (`partner-config/update`) is
+  // deployment-gated: per API-REFERENCE.md § Configure the Brain, it 403s for
+  // a partner admin KS TODAY (exactly what createAdminToken() mints above) and
+  // is explicitly called out as being "removed for non-superadmin partners —
+  // don't build production workflows on it." setBrainConfig self-probes via
+  // brainConfigAvailable first and returns {applied:false, reason} instead of
+  // throwing when the door is closed, so this call is safe/inert either way —
+  // it will very likely no-op on this partner's tier right now. That means
+  // this is NOT yet a working mitigation for N5; it's wired so the limits
+  // take effect automatically the moment this partner's tier opens the door
+  // (e.g. a superadmin-provisioned partner), without another code change.
+  // See docs/ARCHITECTURE.md "Known limitations" for the accepted-risk note.
+  const brainConfig = await kaltura.intellects.setBrainConfig(configId, {
+    anonymousRateLimits: { perMinute: 30, perHour: 500 },
+  }, admin);
+  if (brainConfig.applied) console.log('✓ anonymous rate limits applied', brainConfig.sentKeys);
+  else console.warn(`⚠ anonymous rate limits NOT applied (${brainConfig.code}): ${brainConfig.reason} — N5 abuse-control gap remains open on this partner tier.`);
+
   let avatar;
   if (existingAvatarId) {
     avatar = await kaltura.avatars.get(existingAvatarId, admin);
