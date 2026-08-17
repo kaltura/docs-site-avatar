@@ -282,6 +282,14 @@ test('noInventedApi: denying the fabricated subpath while affirming a real, diff
   );
   assert.equal(r.pass, true);
 });
+test('noInventedApi: a denial followed by an explicit contradictory affirmation of the fabricated subpath still fails', () => {
+  const r = probeNoInventedApi(
+    { expectNoInventedApi: true },
+    "No, there is no analytics-dashboard subpath, but yes you can import it from ./experience/analytics-dashboard."
+  );
+  assert.equal(r.pass, false);
+  assert.equal(r.affirmed, true);
+});
 
 /* scoreTurn aggregation */
 test('scoreTurn: aggregates active probes and lists failing dimensions', () => {
