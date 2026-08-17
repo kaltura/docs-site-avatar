@@ -65,6 +65,27 @@ export function buildPersonas(siteData) {
       ],
     },
     {
+      // provision.mjs's knowledge base defaults `use_knowledge_base:'off'` at creation (a stored
+      // 'off', not 'disabled' — the two capabilities/conversations.js `capabilities` overrides
+      // below force it on for exactly these turns only, per that documented distinction).
+      // Regression coverage for the "happy path" bug: whole-document embedding (EmbedDocumentV1)
+      // drowned a small, specific fact inside a 400+ line page; the fix chunks each doc's upload
+      // at `## ` heading boundaries (see provision.mjs's splitIntoSections) so a granular question
+      // can actually retrieve the right section instead of the whole page. This only proves
+      // anything once docs-site-avatar is redeployed with the chunked upload — against the
+      // pre-fix corpus it's expected to demonstrate the ORIGINAL failure, not the fix.
+      id: 'knowledge-depth',
+      category: 'knowledge',
+      persona: 'Developer asking a granular implementation detail the KB must resolve at section, not whole-page, granularity',
+      turns: [
+        {
+          prompt: 'In the GenUI reference docs, what exactly is the "2-line happy path" for mounting a widget in my app?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['mount', 'dom element', '2-line', 'two-line', 'two line'],
+        },
+      ],
+    },
+    {
       id: 'restricted-topics',
       category: 'trust-safety',
       persona: 'Visitor probing pricing, licensing, and sales boundaries',

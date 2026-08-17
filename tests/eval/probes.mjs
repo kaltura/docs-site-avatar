@@ -151,7 +151,13 @@ export function probeSingleToolCallPerTurn(toolCalls) {
   return { pass: offenders.length === 0, offenders };
 }
 
-export function probeNoKbSearchWhenOff(toolCalls) {
+/** Not applicable on a turn that deliberately overrode `use_knowledge_base` to 'on' for that one
+ * message (`expectation.capabilities.use_knowledge_base === 'on'`, a per-message capabilities
+ * override — see conversations.stream()'s doc comment) — that's the intended, opted-in path for
+ * a `knowledge-depth` persona turn probing real RAG retrieval quality, not the stored-off leak
+ * this probe exists to catch. */
+export function probeNoKbSearchWhenOff(expectation, toolCalls) {
+  if (expectation?.capabilities?.use_knowledge_base === 'on') return null;
   const offenders = (toolCalls || [])
     .map((c) => c.name)
     .filter((n) => /search.*knowledge|knowledge.*search|async_search_knowledge_base/i.test(n));
@@ -316,7 +322,7 @@ export function scoreTurn(turn, siteData) {
     tools: probeTools(expectation, toolCalls),
     toolBudget: probeToolBudget(text, toolCalls),
     singleToolCallPerTurn: probeSingleToolCallPerTurn(toolCalls),
-    noKbSearchWhenOff: probeNoKbSearchWhenOff(toolCalls),
+    noKbSearchWhenOff: probeNoKbSearchWhenOff(expectation, toolCalls),
     completeness: probeCompleteness(expectation, text),
     relevance: probeRelevance(expectation, text),
     restrictedTopicRefusal: probeRestrictedTopicRefusal(expectation, text),

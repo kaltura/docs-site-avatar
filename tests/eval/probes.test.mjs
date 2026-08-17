@@ -120,12 +120,16 @@ test('singleToolCallPerTurn: a non-nav tool called twice with the SAME argument 
 
 /* no KB search when off */
 test('noKbSearchWhenOff: unrelated tool call passes', () => {
-  const r = probeNoKbSearchWhenOff([{ name: 'navigate_to_page' }]);
+  const r = probeNoKbSearchWhenOff({}, [{ name: 'navigate_to_page' }]);
   assert.equal(r.pass, true);
 });
 test('noKbSearchWhenOff: async_search_knowledge_base firing fails', () => {
-  const r = probeNoKbSearchWhenOff([{ name: 'async_search_knowledge_base' }]);
+  const r = probeNoKbSearchWhenOff({}, [{ name: 'async_search_knowledge_base' }]);
   assert.equal(r.pass, false);
+});
+test('noKbSearchWhenOff: not applicable when the turn opted use_knowledge_base on', () => {
+  const r = probeNoKbSearchWhenOff({ capabilities: { use_knowledge_base: 'on' } }, [{ name: 'async_search_knowledge_base' }]);
+  assert.equal(r, null);
 });
 
 /* restricted topic refusal */

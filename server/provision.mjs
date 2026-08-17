@@ -81,6 +81,27 @@ function stripFrontmatter(text) {
   return text.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
 }
 
+/** Split a doc's markdown at top-level (`## `) section boundaries into chunks
+ * (the first chunk is whatever precedes the first `## `, typically the `# `
+ * title + intro; every chunk after that is exactly one `## ` section), each
+ * non-first chunk re-prefixed with the doc's own `# ` title so it still
+ * carries page-level context in isolation. Path A (`knowledge.uploadMarkdown`, what wireKnowledge
+ * uses) has no `chunkSize` knob — that lives only on the gated Path B
+ * (`knowledge.linkCategory`, 403s on this partner tier) — and its indexer
+ * embeds a whole uploaded document as ONE vector (`EmbedDocumentV1`), so a
+ * multi-KB reference page drowns a small detail (e.g. a two-line example
+ * buried under one of a dozen `##` sections) in the rest of the page's
+ * unrelated content. Splitting at the same `## ` boundaries the site already
+ * renders as sections is the only lever Path A leaves for keeping each
+ * embedding scoped enough for RAG to actually hit that detail.
+ */
+function splitIntoSections(markdown) {
+  const titleMatch = markdown.match(/^#\s+(.+)$/m);
+  const title = titleMatch ? titleMatch[1].trim() : '';
+  const sections = markdown.split(/\n(?=## )/);
+  return sections.map((section, i) => (i === 0 || !title ? section : `# ${title}\n\n${section}`).trim());
+}
+
 /** The exact list of real pages this intellect may ever cite — Home plus every
  * page in nav.js, each resolved to its on-disk file. Built fresh per run (never
  * module scope) since it depends on the resolved --site-dir. */
@@ -208,7 +229,7 @@ async function provision() {
 
   const navigateToolId = await upsert(tools.client({
     name: 'navigate_to_page',
-    description: 'Take the visitor to a different page on this site. path MUST be one of the exact URLs in your site map above — never invent one. Call AT MOST ONCE per turn — if multiple pages seem relevant, pick the single best one now and offer the rest as follow-ups, never call this more than once in the same reply. The response tells you whether the page was found, and if alreadyHere is true, the visitor is already on that exact page.',
+    description: 'Take the visitor to a different page on this site. path MUST be one of the exact URLs in your site map above — never invent one. Call AT MOST ONCE per turn — if multiple pages seem relevant, pick the single best one now and offer the rest as follow-ups, never call this more than once in the same reply. The response tells you whether the page was found, and if alreadyHere is true, the visitor is already on that exact page. The response also includes highlightable, the new page\'s own list of highlight_element ids/labels — if the visitor also asked you to point something out there, use THIS list for that highlight_element call in the SAME reply; don\'t wait for a later turn\'s page context.',
     args: {
       path: { prompt: 'The exact text after "path:" for that page in your site map, e.g. "/guides/voice-input-modes/" — for Home this is "/". Never invent one.', type: 'str', required: true },
     },
@@ -421,10 +442,14 @@ async function wireKnowledge(admin, siteDir, docs) {
   for (const doc of docs) {
     const text = await readFile(join(siteDir, 'src', doc.file), 'utf8');
     const markdown = stripFrontmatter(text);
-    const name = `${TAG}-${doc.file.replace(/\//g, '-')}`;
-    const uploaded = await kaltura.knowledge.uploadMarkdown({ markdown, name, categoryId: category.id }, admin);
-    entryIds.push(uploaded.entryId);
-    console.log(`✓ uploaded ${doc.file} to knowledge category`);
+    const sections = splitIntoSections(markdown);
+    const baseName = `${TAG}-${doc.file.replace(/\//g, '-')}`;
+    for (let i = 0; i < sections.length; i++) {
+      const name = sections.length > 1 ? `${baseName}-${i}` : baseName;
+      const uploaded = await kaltura.knowledge.uploadMarkdown({ markdown: sections[i], name, categoryId: category.id }, admin);
+      entryIds.push(uploaded.entryId);
+    }
+    console.log(`✓ uploaded ${doc.file} to knowledge category (${sections.length} chunk${sections.length === 1 ? '' : 's'})`);
   }
 
   return { categoryId: category.id, recordId: record.id, entryIds };
