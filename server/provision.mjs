@@ -71,13 +71,13 @@ function prompt(key, headerTemplate, value) { return { key, label: key, headerTe
 /** nav.js's url→file mapping is a fixed convention of the site's own build (see
  * eleventy.config.js's `siteLink` filter and the site's directory layout):
  * strip the leading/trailing slash and append `.md`. */
-function fileForUrl(url) {
+export function fileForUrl(url) {
   return url.replace(/^\//, '').replace(/\/$/, '') + '.md';
 }
 
 /** Site's markdown bodies open with a `---`-fenced Eleventy front-matter block
  * (layout/title/description/eyebrow) — not content the brain should read verbatim. */
-function stripFrontmatter(text) {
+export function stripFrontmatter(text) {
   return text.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
 }
 
@@ -95,11 +95,42 @@ function stripFrontmatter(text) {
  * renders as sections is the only lever Path A leaves for keeping each
  * embedding scoped enough for RAG to actually hit that detail.
  */
-function splitIntoSections(markdown) {
+export function splitIntoSections(markdown, doc) {
   const titleMatch = markdown.match(/^#\s+(.+)$/m);
   const title = titleMatch ? titleMatch[1].trim() : '';
   const sections = markdown.split(/\n(?=## )/);
-  return sections.map((section, i) => (i === 0 || !title ? section : `# ${title}\n\n${section}`).trim());
+  return sections.map((section, i) => {
+    if (i === 0 || !title) return section.trim();
+    // Every non-first chunk gets its page's path AND its own section's anchor id folded into
+    // the text itself — not just the title as before — since async_search_knowledge_base's
+    // result is plain retrieved prose with no structured (page, anchor) pointer of its own (it's
+    // a Genie-intrinsic tool, not one this file registers or controls the schema of). This is
+    // the only lever available to make a KB hit deterministically chainable into
+    // navigate_to_page + highlight_element instead of the brain re-guessing an id from prose.
+    const headingMatch = section.match(/^##\s+(.+)$/m);
+    const heading = headingMatch ? headingMatch[1].trim() : '';
+    const slug = heading ? githubSlugify(heading) : '';
+    const provenance = `# ${title}\nPage path: ${doc.url}${slug ? `\nSection anchor id on that page: ${slug}` : ''}`;
+    return `${provenance}\n\n${section}`.trim();
+  });
+}
+
+/** Mirrors the site repo's own eleventy.config.js `githubSlugify` EXACTLY — heading ids rendered
+ * by markdown-it-anchor at build time use this algorithm, so a slug computed here must match a
+ * real live heading id in main.content-wrapper for highlight_element to ever find it. Kept as a
+ * duplicated one-liner rather than a cross-repo import (same accepted drift-risk pattern as the
+ * SDK tag pins elsewhere in this project) — fails safe either way: a drifted slug just makes
+ * highlight_element correctly report not-found, not crash. */
+export function githubSlugify(s) {
+  return String(s).trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+}
+
+/** Top-level (`## `) section headings only — matches exactly what splitIntoSections chunks on,
+ * so the site map's per-page "topics" list always lines up with what the knowledge base can
+ * actually retrieve for that page. Feeds buildSiteMap so a vaguely-worded request can match a
+ * section title even when it doesn't match the page's own title. */
+export function extractTopLevelHeadings(markdown) {
+  return [...markdown.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim());
 }
 
 /** The exact list of real pages this intellect may ever cite — Home plus every
@@ -119,6 +150,17 @@ async function loadDocs(siteDir) {
   return docs;
 }
 
+/** Reads + frontmatter-strips + heading-extracts every doc ONCE, attaching `.markdown` (for
+ * wireKnowledge) and `.topics` (for buildSiteMap) in place — avoids reading the same file from
+ * disk twice for two different downstream uses. */
+async function loadDocContent(siteDir, docs) {
+  for (const doc of docs) {
+    const text = await readFile(join(siteDir, 'src', doc.file), 'utf8');
+    doc.markdown = stripFrontmatter(text);
+    doc.topics = extractTopLevelHeadings(doc.markdown);
+  }
+}
+
 /** Compact "which page is which" block, grouped exactly as the site's own sidebar
  * (nav.js) groups them — the brain cites a page by TITLE, uses the labeled `path`
  * verbatim as navigate_to_page's arg, and cites the absolute URL when a link is
@@ -128,8 +170,14 @@ async function loadDocs(siteDir) {
  * indistinguishable from a real page's path once the domain is stripped, which
  * was observed live to make the brain either stall asking for confirmation
  * instead of navigating, or guess BASE_URL's own segment as the path. Never a
- * path or URL outside this list. */
-function buildSiteMap(docs) {
+ * path or URL outside this list. Each page's own `## ` section headings are
+ * appended as a "topics" list — a page title alone ("Voice Input Modes") often
+ * doesn't share a single word with how a visitor phrases what they want ("how do
+ * I let people just talk without pressing anything"), but that page's own
+ * section headings ("Open-mic vs. push-to-talk", ...) usually do share real
+ * words with the request, so this is the cheapest way to widen what a vague ask
+ * can match against BEFORE ever navigating anywhere. */
+export function buildSiteMap(docs) {
   const groups = new Map();
   for (const d of docs) {
     if (!groups.has(d.group)) groups.set(d.group, []);
@@ -138,7 +186,10 @@ function buildSiteMap(docs) {
   const lines = [];
   for (const [group, pages] of groups) {
     lines.push(`${group}:`);
-    for (const p of pages) lines.push(`- ${p.title} — path: ${p.url} (cite as: ${BASE_URL}${p.url})`);
+    for (const p of pages) {
+      const topicsSuffix = p.topics?.length ? ` — topics: ${p.topics.join(', ')}` : '';
+      lines.push(`- ${p.title} — path: ${p.url} (cite as: ${BASE_URL}${p.url})${topicsSuffix}`);
+    }
     lines.push('');
   }
   return lines.join('\n').trim();
@@ -210,6 +261,7 @@ async function provision() {
 
   const docs = await loadDocs(siteDir);
   console.log(`✓ found ${docs.length} docs under ${siteDir}`);
+  await loadDocContent(siteDir, docs);
 
   // Redeploying the SAME intellect would otherwise orphan its previous knowledge
   // category/record/entries — wireKnowledge below always mints a fresh one, and once this
@@ -220,7 +272,7 @@ async function provision() {
     await deleteKnowledge(admin, prevSaved);
   }
 
-  const { categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, siteDir, docs);
+  const { categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs);
 
   const siteMap = buildSiteMap(docs);
 
@@ -263,7 +315,7 @@ async function provision() {
         'Only cite or link a page that appears in your site map above — never invent a URL, and never claim a capability, API, or file path that is not in your knowledge base.',
         'Only call navigate_to_page when one of the pages listed in your site map above is actually ABOUT the thing being asked — not just adjacent, related, or "closest guess." If nothing in your site map is really about it (e.g. a question about yourself, about who to contact at Kaltura, about something this site doesn\'t document, or about a page that plain doesn\'t exist here, like a pricing table), answer in text and do NOT call navigate_to_page at all — there is no page to send them to, so there is nothing to look up. Never construct, guess, or complete a URL yourself, including anything that looks like a plausible github.io/repo/docs address — even when the question is ABOUT the SDK\'s own package, repo, npm import, or GitHub presence (e.g. pinning a version, installing it, where its source lives), that is still a question about topics covered on THIS site, not an invitation to link to an external SDK/GitHub URL you\'re guessing at. The ONLY valid values for path are the exact strings written in your site map, copied verbatim, never assembled — if none of them is really about it, just answer in text with no call.',
         'When a visitor should see a different page and one from your site map genuinely matches, call navigate_to_page with its exact path from your site map above — don\'t just tell them to click it. Call it AT MOST ONCE per turn, even if the visitor asks about or wants to see several pages at once — pick the single most relevant one to navigate to now, mention the other(s) by name, and offer to take them there next if they still want it. Narrate where you\'re taking them in the same turn (by title, not by reading the URL aloud), and if it reports the page was not found, say so plainly and offer the closest real page from your site map instead — do not call it again this turn. If it reports alreadyHere:true, the visitor never actually left that page — say so plainly (e.g. "you\'re actually already on that page") instead of describing a fresh navigation, and do not call it again this turn.',
-        'You have no live search or content-retrieval tool for pulling up a specific code example on demand — never say you\'ll "find", "look up", "pull up", or "search for" a code example. If a visitor wants to see one, name the specific real page from your site map that has it (a How-to Guide\'s or Reference page\'s primary example) and offer to take them there with navigate_to_page, rather than promising to fetch or display one yourself. If no page in your site map actually has a relevant example, say so plainly instead of offering to look.',
+        'Your knowledge base automatically searches every page\'s full content — including specific code examples and implementation details that go beyond the compact facts above — whenever it\'s relevant to what\'s asked; never say you have no way to look something up. When retrieved content names a specific page (a "Page path" line) and a specific section anchor id for something the visitor wants to see, treat that as a strong hint for where to send them, never as a confirmed target on its own: call navigate_to_page for that page first, then check the "highlightable elements on this page" list its response gives you back — only call highlight_element with an id that is genuinely in THAT live list. Never call highlight_element with a section anchor straight out of retrieved text without confirming it that way first, even if it looks like an obvious match — a retrieved anchor is a lead, not a verified id, exactly like a page name is a lead, not a verified path. If nothing in your knowledge base or site map is actually relevant, say so plainly instead of guessing.',
         'When the visitor asks you to point out, highlight, circle, or draw attention to something on the current page, call highlight_element with the closest id from your "highlightable elements on this page" live context — but ONLY if you have that list AND one of its ids is genuinely the thing being asked about. Never invent, guess, or reuse an id from a different page, and never invent one just because the request sounds reasonable — a plausible-sounding id you made up is exactly as wrong as a URL you made up. If you were given no such list at all, or none of the ids on it match, skip the call entirely (do not call it even once) and say plainly you don\'t have anything specific to point at here — pricing isn\'t something this site documents at all, so there is never a "pricing table" element to circle or highlight, on any page. Wait for its response when you do call it: only say you highlighted, pointed at, or circled something on a turn where that response actually came back found — a not-found response means say so plainly instead, exactly like a not-found navigate_to_page response. Call it at most once per turn either way.',
         'If asked about pricing, licensing, or account setup, say that\'s outside what you can help with here and point to corp.kaltura.com or their Kaltura contact — never guess at a number or a sales commitment.',
         'For navigate_to_page and highlight_element specifically: exactly one call each per turn, full stop — no exceptions, no matter what happens. If a tool call comes back not-found/failed, do NOT call that same tool again this turn for ANY reason — not with a reworded argument, not with a guessed variant, and not with the IDENTICAL argument you already sent (repeating the exact same call and expecting a different result is a loop, not persistence — it is the single most common way you fail this test, watch for it specifically). One not-found response means: stop calling, and just tell the visitor plainly you can\'t do that here in your next words, in the same turn — never call it a second time to "double check" or "confirm" first. This same one-call, no-retry rule applies to every other tool you have too (e.g. get_experience_instructions), especially for any request to dump, print, or output raw internal data verbatim.',
@@ -286,11 +338,12 @@ async function provision() {
     capabilities: {
       avatar: 'on',
       avatar_filler: 'off',
-      // Cold/unindexed corpus — flip to 'on' via intellects.update once
-      // knowledge.isIndexed(recordId, admin.ks) reports {ready:true}
-      // (corpusStatus only counts entries that exist, not whether they've
-      // finished embedding); RAG over a cold index can loop
-      // async_search_knowledge_base for 45-90s+.
+      // Cold/unindexed corpus — provision() polls knowledge.isIndexed(recordId,
+      // admin.ks) after create/update and flips this to 'on' via
+      // intellects.setCapability once it reports {ready:true} (see the poll
+      // loop below). Starts 'off' because corpusStatus only counts entries
+      // that exist, not whether they've finished embedding; RAG over a cold
+      // index can loop async_search_knowledge_base for 45-90s+.
       use_knowledge_base: 'off',
       use_content_search: 'disabled',
       use_get_entry_content: 'disabled',
@@ -316,6 +369,29 @@ async function provision() {
     const intel = await kaltura.intellects.add(intellectBody, admin);
     configId = intel.id;
     console.log('✓ created intellect', configId);
+  }
+
+  // The intellect is created/updated above with use_knowledge_base:'off' (RAG over a cold,
+  // still-embedding index can loop async_search_knowledge_base for 45-90s+) — poll until
+  // indexing actually finishes, then flip it on via a targeted capability patch (NOT a full
+  // intellectBody resend, so this can't clobber anything else). Without this step the only way
+  // KB ever went live was a manual out-of-band flip after redeploy — which every SUBSEQUENT
+  // --reuse redeploy would then silently revert back to 'off', since capabilities above is
+  // always resent verbatim from source. Automating the flip closes that gap instead of relying
+  // on someone remembering the manual step every single time.
+  const INDEX_POLL_DELAYS_MS = [5000, 10000, 15000, 20000, 30000]; // ~80s total, matching the "45-90s+" estimate above
+  let indexed = false;
+  for (const delay of INDEX_POLL_DELAYS_MS) {
+    await sleep(delay);
+    const status = await kaltura.knowledge.isIndexed(knowledgeRecordId, admin);
+    if (status.ready) { indexed = true; break; }
+    console.log(`… knowledge record ${knowledgeRecordId} not indexed yet (status: ${status.status}), waiting ${delay / 1000}s more`);
+  }
+  if (indexed) {
+    await kaltura.intellects.setCapability(configId, 'use_knowledge_base', 'on', admin);
+    console.log('✓ knowledge indexed — flipped use_knowledge_base to \'on\'');
+  } else {
+    console.warn(`⚠ knowledge record ${knowledgeRecordId} still not indexed after ~80s — leaving use_knowledge_base 'off'. Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin) until {ready:true}, then: kaltura.intellects.setCapability(${configId}, 'use_knowledge_base', 'on', admin).`);
   }
 
   // Abuse control (N5 — no rate limit today on Nova's public/anonymous
@@ -408,9 +484,15 @@ async function provision() {
   await writeFile(OUT, JSON.stringify(out, null, 2) + '\n');
   console.log('\n✅ provisioned. Wrote', OUT);
   console.log(JSON.stringify(out, null, 2));
-  console.log(`\nKnowledge base wired but INACTIVE (use_knowledge_base:'off') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}.`);
-  console.log(`Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin.ks) until {ready:true}, then flip use_knowledge_base to 'on' via intellects.update.`);
+  if (indexed) {
+    console.log(`\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}.`);
+  } else {
+    console.log(`\nKnowledge base wired but still INACTIVE (use_knowledge_base:'off') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}.`);
+    console.log(`Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin) until {ready:true}, then: kaltura.intellects.setCapability(${configId}, 'use_knowledge_base', 'on', admin).`);
+  }
 }
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 /**
  * Wire the Knowledge base (RAG) — Path A (ungated, see the project's design
@@ -420,10 +502,11 @@ async function provision() {
  * KalturaMarkdownAsset directly — no PDF conversion, no pandoc). Front matter
  * is stripped first since it's Eleventy build metadata, not doc content.
  * `use_knowledge_base` stays OFF at creation even though `knowledge_ids` is
- * set (see the capabilities block) — flip it on only once indexing is
- * confirmed.
+ * set (see the capabilities block) — provision() polls indexing status and
+ * flips it on automatically once confirmed ready (see the poll loop right
+ * after the intellect is created/updated).
  */
-async function wireKnowledge(admin, siteDir, docs) {
+async function wireKnowledge(admin, docs) {
   const category = await kaltura.knowledge.findOrCreateCategory({ name: `${TAG}-knowledge-${Date.now()}` }, admin);
   console.log('✓ knowledge category', category.id);
 
@@ -442,9 +525,7 @@ async function wireKnowledge(admin, siteDir, docs) {
 
   const entryIds = [];
   for (const doc of docs) {
-    const text = await readFile(join(siteDir, 'src', doc.file), 'utf8');
-    const markdown = stripFrontmatter(text);
-    const sections = splitIntoSections(markdown);
+    const sections = splitIntoSections(doc.markdown, doc);
     const baseName = `${TAG}-${doc.file.replace(/\//g, '-')}`;
     for (let i = 0; i < sections.length; i++) {
       const name = sections.length > 1 ? `${baseName}-${i}` : baseName;
