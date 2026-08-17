@@ -40,7 +40,7 @@ export function buildPersonas(siteData) {
   // safe and keeps this persona runnable even before any page is tagged.
   const realTarget = siteData.highlightTargets[0] || { id: 'code-example', label: 'that code example' };
 
-  return [
+  const personas = [
     {
       id: 'kickoff',
       category: 'lifecycle',
@@ -65,9 +65,6 @@ export function buildPersonas(siteData) {
       ],
     },
     {
-      // provision.mjs's knowledge base defaults `use_knowledge_base:'off'` at creation (a stored
-      // 'off', not 'disabled' — the two capabilities/conversations.js `capabilities` overrides
-      // below force it on for exactly these turns only, per that documented distinction).
       // Regression coverage for the "happy path" bug: whole-document embedding (EmbedDocumentV1)
       // drowned a small, specific fact inside a 400+ line page; the fix chunks each doc's upload
       // at `## ` heading boundaries (see provision.mjs's splitIntoSections) so a granular question
@@ -202,4 +199,17 @@ export function buildPersonas(siteData) {
       ],
     },
   ];
+
+  // use_knowledge_base is now the intellect's persistent capability (provision.mjs no longer
+  // leaves it 'off' by default), so any turn may legitimately trigger a KB search — opt every
+  // turn in unless it already carries its own explicit `capabilities` override, so
+  // probes.mjs's probeNoKbSearchWhenOff reflects the real live default instead of the stale
+  // off-by-default assumption it was written under.
+  for (const persona of personas) {
+    for (const turn of persona.turns) {
+      if (!turn.capabilities) turn.capabilities = { use_knowledge_base: 'on' };
+    }
+  }
+
+  return personas;
 }
