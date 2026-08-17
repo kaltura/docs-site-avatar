@@ -290,9 +290,7 @@ async function provision() {
       // knowledge.isIndexed(recordId, admin.ks) reports {ready:true}
       // (corpusStatus only counts entries that exist, not whether they've
       // finished embedding); RAG over a cold index can loop
-      // async_search_knowledge_base for 45-90s+. NOTE: isIndexed() isn't in
-      // this repo's vendored SDK pin yet (v1.0.2, see scripts/fetch-sdk.mjs)
-      // — bump the pin before relying on it here.
+      // async_search_knowledge_base for 45-90s+.
       use_knowledge_base: 'off',
       use_content_search: 'disabled',
       use_get_entry_content: 'disabled',
@@ -411,7 +409,7 @@ async function provision() {
   console.log('\n✅ provisioned. Wrote', OUT);
   console.log(JSON.stringify(out, null, 2));
   console.log(`\nKnowledge base wired but INACTIVE (use_knowledge_base:'off') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}.`);
-  console.log(`Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin.ks) until {ready:true} (not yet in this repo's vendored SDK pin — see scripts/fetch-sdk.mjs), then flip use_knowledge_base to 'on' via intellects.update.`);
+  console.log(`Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin.ks) until {ready:true}, then flip use_knowledge_base to 'on' via intellects.update.`);
 }
 
 /**
