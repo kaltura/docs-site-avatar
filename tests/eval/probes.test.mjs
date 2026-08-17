@@ -275,6 +275,13 @@ test('noInventedApi: affirming a fabricated subpath exists fails', () => {
   const r = probeNoInventedApi({ expectNoInventedApi: true }, 'Yes, you can import it from ./experience/analytics-dashboard.');
   assert.equal(r.pass, false);
 });
+test('noInventedApi: denying the fabricated subpath while affirming a real, different one passes (live-observed phrasing)', () => {
+  const r = probeNoInventedApi(
+    { expectNoInventedApi: true },
+    'The SDK does not have an analytics-dashboard subpath, but it does provide a dedicated analytics subpath at ./experience/analytics.'
+  );
+  assert.equal(r.pass, true);
+});
 
 /* scoreTurn aggregation */
 test('scoreTurn: aggregates active probes and lists failing dimensions', () => {

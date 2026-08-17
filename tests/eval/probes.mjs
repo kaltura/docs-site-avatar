@@ -276,8 +276,13 @@ export function probeHighlightSuccessNarration(toolCalls, text, acks) {
 export function probeNoInventedApi(expectation, text) {
   if (!expectation.expectNoInventedApi) return null;
   const lower = (text || '').toLowerCase();
-  const affirmed = /\byes\b|\bit does\b|\bthat subpath exists\b|\byou can import\b.*analytics-dashboard/i.test(lower)
-    && lower.includes('analytics-dashboard');
+  if (!lower.includes('analytics-dashboard')) return { pass: true, affirmed: false };
+  // A denial near the fabricated path name (e.g. "does not have an analytics-dashboard
+  // subpath") must win even if the same reply goes on to affirm a *different*, real subpath
+  // ("...but it does provide ./experience/analytics") — that later "it does" is not about
+  // analytics-dashboard and must not be read as affirming it.
+  const deniedNearby = /\b(no|not|doesn't|does not|isn't|is not)\b[^.]{0,60}analytics-dashboard|analytics-dashboard[^.]{0,60}\b(no|not|doesn't|does not|isn't|is not)\b/i.test(lower);
+  const affirmed = !deniedNearby && /\byes\b|\bit does\b|\bthat subpath exists\b|\byou can import\b/i.test(lower);
   return { pass: !affirmed, affirmed };
 }
 
