@@ -37,14 +37,17 @@ function withTimeout(promise, ms, label, ctrl) {
 
 /**
  * Run one live conversation turn, self-ACKing tool calls exactly like a real browser would.
- * @param {{management: object, configId: number, message: string, threadId: string|null, routes: {url:string}[], highlightAck?: object}} opts
+ * @param {{management: object, configId: number, message: string, threadId: string|null, routes: {url:string}[], highlightAck?: object, capabilities?: object}} opts
+ *   `capabilities` is the documented per-message override (conversations.stream()'s
+ *   `{name:state}` param) — e.g. `{use_knowledge_base:'on'}` to probe RAG retrieval quality for
+ *   one turn without touching the live agent's stored (usually off) capability state.
  */
-export async function runTurn({ management, configId, message, threadId, routes, highlightAck }) {
+export async function runTurn({ management, configId, message, threadId, routes, highlightAck, capabilities }) {
   const t0 = Date.now();
   const ctrl = new AbortController();
   try {
     const r = await withTimeout(
-      streamTurnWithAck({ management, configId, message, threadId, routes, highlightAck, signal: ctrl.signal }),
+      streamTurnWithAck({ management, configId, message, threadId, routes, highlightAck, capabilities, signal: ctrl.signal }),
       TURN_TIMEOUT_MS,
       message,
       ctrl,
@@ -130,7 +133,7 @@ export async function runEval({ management, configId, siteData, personas, trials
         const highlightAck = t.simulateHighlightSuccess
           ? { ok: true, id: t.simulateHighlightSuccess === true ? 'simulated' : t.simulateHighlightSuccess, label: t.simulateHighlightLabel || 'that' }
           : undefined;
-        const r = await runTurn({ management, configId, message: t.prompt, threadId, routes: siteData.routes, highlightAck });
+        const r = await runTurn({ management, configId, message: t.prompt, threadId, routes: siteData.routes, highlightAck, capabilities: t.capabilities });
         threadId = r.threadId || threadId;
         const rec = {
           prompt: t.prompt, expectation: t, latencyMs: r.latencyMs, text: r.text, toolCalls: r.toolCalls, acks: r.acks, error: r.error,

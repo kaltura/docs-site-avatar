@@ -60,7 +60,7 @@ const trialsArg = process.argv.includes('--trials') ? Number(process.argv[proces
 const trials = Number.isInteger(trialsArg) && trialsArg > 0 ? trialsArg : 1;
 const judgeArg = process.argv.includes('--judge') ? process.argv[process.argv.indexOf('--judge') + 1] : null;
 
-log(`▶ loaded ${siteData.routes.length} routes, ${siteData.highlightTargets.length} highlight targets from ${siteData.siteDir}`);
+log(`▶ loaded ${siteData.routes.length} routes, ${siteData.highlightTargets.length} tagged highlight targets, ${siteData.headingTargets.length} heading targets (browser-only — this headless run can't exercise them) from ${siteData.siteDir}`);
 if (siteData.untaggedRoutes.length) log(`  (untagged pages, expected — not every page needs a highlight target: ${siteData.untaggedRoutes.map((r) => r.url).join(', ')})`);
 if (trials > 1) log(`▶ running ${trials} trials per persona for pass^k reliability gating`);
 

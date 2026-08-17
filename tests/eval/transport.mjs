@@ -79,6 +79,10 @@ function ackHighlight(ksStr, call, fetchImpl, forceAck) {
  * @param {{url:string}[]} opts.routes
  * @param {{ok:boolean, id?:string, label?:string}} [opts.highlightAck] simulated success ack for
  *   highlight_element — see ackHighlight's comment for why this is opt-in per turn.
+ * @param {object} [opts.capabilities] per-message capabilities override, forwarded verbatim to
+ *   `conversations.stream()` (e.g. `{use_knowledge_base:'on'}` to probe RAG for one turn without
+ *   touching the live agent's stored capability state — see conversations.stream()'s doc comment
+ *   on the stored-DISABLED-veto vs. stored-off-can-be-overridden distinction).
  * @param {typeof fetch} [opts.fetchImpl]
  * @param {AbortSignal} [opts.signal] forwarded straight to `conversations.stream()` — the eval's
  *   own turn-level timeout (see engine.mjs's `withTimeout`) MUST abort this when it fires, or the
@@ -87,11 +91,11 @@ function ackHighlight(ksStr, call, fetchImpl, forceAck) {
  *   the run finished and printed its report (the CLI never actually exited).
  * @returns {Promise<{text:string, threadId:string|null, toolCalls:object[], acks:object[], rawToolSegCount:number, spiralDetected:boolean, spiralRecovered:boolean}>}
  */
-export async function streamTurnWithAck({ management, configId, message, threadId, routes, highlightAck, fetchImpl = fetch, signal }) {
+export async function streamTurnWithAck({ management, configId, message, threadId, routes, highlightAck, capabilities, fetchImpl = fetch, signal }) {
   async function runOnce(userMessage, tid) {
     const token = await management.sessions.createConversationToken({ configId });
     const ksStr = ksString(token);
-    const gen = management.conversations.stream({ userMessage, ...(tid ? { threadId: tid } : {}), signal }, token);
+    const gen = management.conversations.stream({ userMessage, ...(tid ? { threadId: tid } : {}), ...(capabilities ? { capabilities } : {}), signal }, token);
 
     let text = '';
     let outThreadId = tid || null;
