@@ -70,9 +70,11 @@ function prompt(key, headerTemplate, value) { return { key, label: key, headerTe
 
 /** nav.js's url→file mapping is a fixed convention of the site's own build (see
  * eleventy.config.js's `siteLink` filter and the site's directory layout):
- * strip the leading/trailing slash and append `.md`. */
+ * strip the leading/trailing slash and append `.md`. Home (`/`) is the one
+ * exception — it resolves to `index.md`, matching loadDocs' own Home entry. */
 export function fileForUrl(url) {
-  return url.replace(/^\//, '').replace(/\/$/, '') + '.md';
+  const stripped = url.replace(/^\//, '').replace(/\/$/, '');
+  return stripped ? `${stripped}.md` : 'index.md';
 }
 
 /** Site's markdown bodies open with a `---`-fenced Eleventy front-matter block
@@ -108,11 +110,19 @@ export function splitIntoSections(markdown, doc) {
     // the only lever available to make a KB hit deterministically chainable into
     // navigate_to_page + highlight_element instead of the brain re-guessing an id from prose.
     const headingMatch = section.match(/^##\s+(.+)$/m);
-    const heading = headingMatch ? headingMatch[1].trim() : '';
+    const heading = headingMatch ? stripClosingHashes(headingMatch[1]) : '';
     const slug = heading ? githubSlugify(heading) : '';
     const provenance = `# ${title}\nPage path: ${doc.url}${slug ? `\nSection anchor id on that page: ${slug}` : ''}`;
     return `${provenance}\n\n${section}`.trim();
   });
+}
+
+/** CommonMark ATX headings allow an optional closing `#` sequence (preceded by whitespace,
+ * e.g. `## Title ##`) — markdown-it-anchor slugifies the heading with that sequence already
+ * stripped, so any regex extraction of a heading's text has to strip it too, or the computed
+ * slug/topic diverges from the real DOM id (same fix applied in tests/eval/site-data.mjs). */
+function stripClosingHashes(heading) {
+  return heading.trim().replace(/\s+#+\s*$/, '').trim();
 }
 
 /** Mirrors the site repo's own eleventy.config.js `githubSlugify` EXACTLY — heading ids rendered
@@ -130,7 +140,7 @@ export function githubSlugify(s) {
  * actually retrieve for that page. Feeds buildSiteMap so a vaguely-worded request can match a
  * section title even when it doesn't match the page's own title. */
 export function extractTopLevelHeadings(markdown) {
-  return [...markdown.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim());
+  return [...markdown.matchAll(/^##\s+(.+)$/gm)].map((m) => stripClosingHashes(m[1]));
 }
 
 /** The exact list of real pages this intellect may ever cite — Home plus every
@@ -338,8 +348,8 @@ async function provision() {
     capabilities: {
       avatar: 'on',
       avatar_filler: 'off',
-      // Cold/unindexed corpus — provision() polls knowledge.isIndexed(recordId,
-      // admin.ks) after create/update and flips this to 'on' via
+      // Cold/unindexed corpus — provision() polls kaltura.knowledge.isIndexed(recordId,
+      // admin) after create/update and flips this to 'on' via
       // intellects.setCapability once it reports {ready:true} (see the poll
       // loop below). Starts 'off' because corpusStatus only counts entries
       // that exist, not whether they've finished embedding; RAG over a cold
@@ -379,13 +389,15 @@ async function provision() {
   // --reuse redeploy would then silently revert back to 'off', since capabilities above is
   // always resent verbatim from source. Automating the flip closes that gap instead of relying
   // on someone remembering the manual step every single time.
-  const INDEX_POLL_DELAYS_MS = [5000, 10000, 15000, 20000, 30000]; // ~80s total, matching the "45-90s+" estimate above
+  const INDEX_POLL_DELAYS_MS = [5000, 10000, 15000, 20000, 30000]; // ~80s total after the immediate check, matching the "45-90s+" estimate above
   let indexed = false;
-  for (const delay of INDEX_POLL_DELAYS_MS) {
-    await sleep(delay);
+  for (let attempt = 0; !indexed; attempt++) {
     const status = await kaltura.knowledge.isIndexed(knowledgeRecordId, admin);
     if (status.ready) { indexed = true; break; }
-    console.log(`… knowledge record ${knowledgeRecordId} not indexed yet (status: ${status.status}), waiting ${delay / 1000}s more`);
+    const delay = INDEX_POLL_DELAYS_MS[attempt];
+    if (delay === undefined) break;
+    console.log(`… knowledge record ${knowledgeRecordId} not indexed yet (status: ${status.status}), waiting ${delay / 1000}s before next check`);
+    await sleep(delay);
   }
   if (indexed) {
     await kaltura.intellects.setCapability(configId, 'use_knowledge_base', 'on', admin);

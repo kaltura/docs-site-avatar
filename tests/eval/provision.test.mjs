@@ -16,8 +16,8 @@ const {
 test('fileForUrl: strips slashes and appends .md', () => {
   assert.equal(fileForUrl('/guides/voice-input-modes/'), 'guides/voice-input-modes.md');
 });
-test('fileForUrl: home path resolves to index.md-shaped result', () => {
-  assert.equal(fileForUrl('/'), '.md');
+test('fileForUrl: home path resolves to index.md', () => {
+  assert.equal(fileForUrl('/'), 'index.md');
 });
 
 /* stripFrontmatter */
@@ -45,6 +45,9 @@ test('extractTopLevelHeadings: collects only ## headings, in order', () => {
 test('extractTopLevelHeadings: empty array when there are no ## headings', () => {
   assert.deepEqual(extractTopLevelHeadings('# Title\n\nJust intro text.'), []);
 });
+test('extractTopLevelHeadings: strips CommonMark\'s optional closing # sequence', () => {
+  assert.deepEqual(extractTopLevelHeadings('## Title ##'), ['Title']);
+});
 
 /* splitIntoSections */
 test('splitIntoSections: first chunk is title+intro, unprefixed', () => {
@@ -61,6 +64,11 @@ test('splitIntoSections: later chunks are prefixed with title, page path, and an
     chunks[1],
     '# My Page\nPage path: /my-page/\nSection anchor id on that page: section-one\n\n## Section One\n\nBody one.',
   );
+});
+test('splitIntoSections: strips CommonMark\'s optional closing # sequence from the anchor slug', () => {
+  const md = '# My Page\n\nIntro text.\n\n## Section One ##\n\nBody one.';
+  const chunks = splitIntoSections(md, { url: '/my-page/' });
+  assert.match(chunks[1], /Section anchor id on that page: section-one\n/);
 });
 test('splitIntoSections: single-chunk doc (no ## sections) returns just the trimmed source', () => {
   const md = '# My Page\n\nJust one section, no subheadings.';
