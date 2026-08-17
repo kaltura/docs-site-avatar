@@ -284,6 +284,31 @@ async function provision() {
 
   const { categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs);
 
+  // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
+  // send it in that single add/update call alongside knowledge_ids — never as a follow-up
+  // setCapability patch. This SDK's own docs (CLIENT-COMMANDS.md "Gotcha 2") say partner config
+  // is Redis-cached ~24h server-side and a capability flip on an EXISTING intellect won't reach
+  // converse time until that cache expires; a two-step create/update-then-setCapability sequence
+  // additionally risks the cache latching onto the transient 'off' value written in step one
+  // instead of ever seeing step two's 'on'. Polling first and writing once removes that race for
+  // a fresh create (no cache entry yet, so the single write lands immediately) — a `--reuse`
+  // redeploy of an intellect the runtime has already cached is still subject to that ~24h delay
+  // regardless of how the write is sequenced; that part is a platform limitation, not something
+  // this file can work around.
+  console.log(`… polling knowledge record ${knowledgeRecordId} for indexing completion (RAG over a cold index can loop async_search_knowledge_base for 45-90s+)`);
+  const INDEX_POLL_DELAYS_MS = [5000, 10000, 15000, 20000, 30000]; // ~80s total after the immediate check, matching the "45-90s+" estimate above
+  let indexed = false;
+  for (let attempt = 0; !indexed; attempt++) {
+    const status = await kaltura.knowledge.isIndexed(knowledgeRecordId, admin);
+    if (status.ready) { indexed = true; break; }
+    const delay = INDEX_POLL_DELAYS_MS[attempt];
+    if (delay === undefined) break;
+    console.log(`… knowledge record ${knowledgeRecordId} not indexed yet (status: ${status.status}), waiting ${delay / 1000}s before next check`);
+    await sleep(delay);
+  }
+  if (indexed) console.log('✓ knowledge indexed — use_knowledge_base will be set to \'on\'');
+  else console.warn(`⚠ knowledge record ${knowledgeRecordId} still not indexed after ~80s — use_knowledge_base will stay 'off'. Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin) until {ready:true}, then re-run provisioning.`);
+
   const siteMap = buildSiteMap(docs);
 
   const existingTools = await kaltura.tools.list(admin).all();
@@ -348,13 +373,11 @@ async function provision() {
     capabilities: {
       avatar: 'on',
       avatar_filler: 'off',
-      // Cold/unindexed corpus — provision() polls kaltura.knowledge.isIndexed(recordId,
-      // admin) after create/update and flips this to 'on' via
-      // intellects.setCapability once it reports {ready:true} (see the poll
-      // loop below). Starts 'off' because corpusStatus only counts entries
-      // that exist, not whether they've finished embedding; RAG over a cold
-      // index can loop async_search_knowledge_base for 45-90s+.
-      use_knowledge_base: 'off',
+      // Resolved above, before this intellect is created/updated, from polling
+      // kaltura.knowledge.isIndexed() on the record just uploaded — see the
+      // comment above wireKnowledge's call site for why this is set here,
+      // in the same write, rather than via a follow-up setCapability call.
+      use_knowledge_base: indexed ? 'on' : 'off',
       use_content_search: 'disabled',
       use_get_entry_content: 'disabled',
       use_related_files: 'disabled',
@@ -379,31 +402,6 @@ async function provision() {
     const intel = await kaltura.intellects.add(intellectBody, admin);
     configId = intel.id;
     console.log('✓ created intellect', configId);
-  }
-
-  // The intellect is created/updated above with use_knowledge_base:'off' (RAG over a cold,
-  // still-embedding index can loop async_search_knowledge_base for 45-90s+) — poll until
-  // indexing actually finishes, then flip it on via a targeted capability patch (NOT a full
-  // intellectBody resend, so this can't clobber anything else). Without this step the only way
-  // KB ever went live was a manual out-of-band flip after redeploy — which every SUBSEQUENT
-  // --reuse redeploy would then silently revert back to 'off', since capabilities above is
-  // always resent verbatim from source. Automating the flip closes that gap instead of relying
-  // on someone remembering the manual step every single time.
-  const INDEX_POLL_DELAYS_MS = [5000, 10000, 15000, 20000, 30000]; // ~80s total after the immediate check, matching the "45-90s+" estimate above
-  let indexed = false;
-  for (let attempt = 0; !indexed; attempt++) {
-    const status = await kaltura.knowledge.isIndexed(knowledgeRecordId, admin);
-    if (status.ready) { indexed = true; break; }
-    const delay = INDEX_POLL_DELAYS_MS[attempt];
-    if (delay === undefined) break;
-    console.log(`… knowledge record ${knowledgeRecordId} not indexed yet (status: ${status.status}), waiting ${delay / 1000}s before next check`);
-    await sleep(delay);
-  }
-  if (indexed) {
-    await kaltura.intellects.setCapability(configId, 'use_knowledge_base', 'on', admin);
-    console.log('✓ knowledge indexed — flipped use_knowledge_base to \'on\'');
-  } else {
-    console.warn(`⚠ knowledge record ${knowledgeRecordId} still not indexed after ~80s — leaving use_knowledge_base 'off'. Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin) until {ready:true}, then: kaltura.intellects.setCapability(${configId}, 'use_knowledge_base', 'on', admin).`);
   }
 
   // Abuse control (N5 — no rate limit today on Nova's public/anonymous
@@ -500,7 +498,7 @@ async function provision() {
     console.log(`\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}.`);
   } else {
     console.log(`\nKnowledge base wired but still INACTIVE (use_knowledge_base:'off') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}.`);
-    console.log(`Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin) until {ready:true}, then: kaltura.intellects.setCapability(${configId}, 'use_knowledge_base', 'on', admin).`);
+    console.log(`Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin) until {ready:true}, then re-run \`node server/provision.mjs --reuse ${configId} ...\` so the flip to 'on' lands in the same write as everything else, not a bare setCapability call on an intellect the runtime may already have cached.`);
   }
 }
 
@@ -513,10 +511,10 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
  * site's docs into that category via `knowledge.uploadMarkdown()` (attaches a
  * KalturaMarkdownAsset directly — no PDF conversion, no pandoc). Front matter
  * is stripped first since it's Eleventy build metadata, not doc content.
- * `use_knowledge_base` stays OFF at creation even though `knowledge_ids` is
- * set (see the capabilities block) — provision() polls indexing status and
- * flips it on automatically once confirmed ready (see the poll loop right
- * after the intellect is created/updated).
+ * `use_knowledge_base` only goes `'on'` in the SAME add/update call as `knowledge_ids` — never a
+ * follow-up patch — because provision() polls this record's indexing status (see the poll loop
+ * right after this call returns) and resolves `capabilities.use_knowledge_base` BEFORE the
+ * intellect is ever created/updated.
  */
 async function wireKnowledge(admin, docs) {
   const category = await kaltura.knowledge.findOrCreateCategory({ name: `${TAG}-knowledge-${Date.now()}` }, admin);
