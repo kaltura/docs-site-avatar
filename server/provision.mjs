@@ -81,9 +81,11 @@ function stripFrontmatter(text) {
   return text.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
 }
 
-/** Split a doc's markdown into one chunk per top-level (`## `) section, each
- * prefixed with the doc's own `# ` title so an isolated chunk still carries
- * page-level context. Path A (`knowledge.uploadMarkdown`, what wireKnowledge
+/** Split a doc's markdown at top-level (`## `) section boundaries into chunks
+ * (the first chunk is whatever precedes the first `## `, typically the `# `
+ * title + intro; every chunk after that is exactly one `## ` section), each
+ * non-first chunk re-prefixed with the doc's own `# ` title so it still
+ * carries page-level context in isolation. Path A (`knowledge.uploadMarkdown`, what wireKnowledge
  * uses) has no `chunkSize` knob — that lives only on the gated Path B
  * (`knowledge.linkCategory`, 403s on this partner tier) — and its indexer
  * embeds a whole uploaded document as ONE vector (`EmbedDocumentV1`), so a
@@ -447,7 +449,7 @@ async function wireKnowledge(admin, siteDir, docs) {
       const uploaded = await kaltura.knowledge.uploadMarkdown({ markdown: sections[i], name, categoryId: category.id }, admin);
       entryIds.push(uploaded.entryId);
     }
-    console.log(`✓ uploaded ${doc.file} to knowledge category (${sections.length} section${sections.length === 1 ? '' : 's'})`);
+    console.log(`✓ uploaded ${doc.file} to knowledge category (${sections.length} chunk${sections.length === 1 ? '' : 's'})`);
   }
 
   return { categoryId: category.id, recordId: record.id, entryIds };
