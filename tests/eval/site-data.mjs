@@ -63,7 +63,10 @@ export async function loadSiteData(opts = {}) {
       highlightTargets.push({ url: route.url, title: route.title, id: m[1], label: m[2] });
     }
     for (const m of text.matchAll(HEADING_RE)) {
-      const label = m[1].trim();
+      // CommonMark ATX headings allow an optional closing `#` sequence (preceded by whitespace);
+      // markdown-it-anchor slugifies the heading with that sequence already stripped, so this
+      // regex extraction has to strip it too or headingTargets' id would diverge from the real DOM id.
+      const label = m[1].trim().replace(/\s+#+\s*$/, '').trim();
       headingTargets.push({ url: route.url, title: route.title, id: githubSlugify(label), label });
     }
   }
