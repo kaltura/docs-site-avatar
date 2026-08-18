@@ -345,6 +345,11 @@ test('noFalseHighlightClaim: claiming success with no tool call at all fails', (
   assert.equal(r.pass, false);
   assert.equal(r.fired, false);
 });
+test('noFalseHighlightClaim: "pointed out" (not just "pointed to/at") is still caught when the ack never succeeded', () => {
+  const r = probeNoFalseHighlightClaim([{ name: 'highlight_element' }], "I've pointed out the quick-start browser code example for you.");
+  assert.equal(r.pass, false);
+  assert.equal(r.fired, true);
+});
 
 test('scoreTurn: a false highlight claim is release-blocking even though the tool call itself is allowed', () => {
   const turn = {
