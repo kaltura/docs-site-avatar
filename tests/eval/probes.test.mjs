@@ -412,6 +412,16 @@ test('probeHighlightSuccessNarration: a compound predicate ("I\'ve navigated us 
   assert.equal(r.claimed, true);
 });
 
+test('probeHighlightSuccessNarration: "pointed out" (not just "pointed to/at") still counts as a claim (live-observed phrasing)', () => {
+  const r = probeHighlightSuccessNarration(
+    [{ name: 'highlight_element' }],
+    "I've pointed out the quick-start browser code example for you on the Getting Started page.",
+    okAck,
+  );
+  assert.equal(r.pass, true);
+  assert.equal(r.claimed, true);
+});
+
 test('scoreTurn: a genuine highlight success with correct narration is healthy and dimension-scored', () => {
   const turn = {
     expectation: {},
