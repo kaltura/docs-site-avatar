@@ -236,7 +236,7 @@ export function probeNavPathMatch(expectation, toolCalls, siteData) {
 // sharing one subject across two verbs ("I've navigated us to the page and highlighted the
 // example") — the claim verb there follows "and", not "i"/"i've" directly, so that's matched
 // as its own alternative.
-const FALSE_HIGHLIGHT_CLAIM_RE = /\bi(?:'ve| have)?\s+(?:just|now|already|successfully)?\s*(?:highlighted|circled|pointed (?:to|at)|marked|drawn attention to)\b|\bthere,?\s+(?:i\s+)?(?:highlighted|circled|pointed)|\band\s+(?:highlighted|circled|pointed (?:to|at)|marked|drawn attention to)\b/i;
+const FALSE_HIGHLIGHT_CLAIM_RE = /\bi(?:'ve| have)?\s+(?:just|now|already|successfully)?\s*(?:highlighted|circled|pointed (?:to|at|out)|marked|drawn attention to)\b|\bthere,?\s+(?:i\s+)?(?:highlighted|circled|pointed)|\band\s+(?:highlighted|circled|pointed (?:to|at|out)|marked|drawn attention to)\b/i;
 
 /**
  * highlight_element is `waitForResponse:true` (like navigate_to_page) — calling it is fine even
