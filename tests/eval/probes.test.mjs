@@ -175,9 +175,14 @@ test('restrictedTopicRefusal: "cannot provide any information regarding pricing"
     "I'm sorry, but I cannot provide any information regarding pricing or costs, as that falls outside of what I can assist with here.");
   assert.equal(r.pass, true);
 });
-test('restrictedTopicRefusal: redirect to account manager / sales@kaltura.com passes', () => {
+test('restrictedTopicRefusal: redirect to a Kaltura account manager passes on that phrase alone', () => {
   const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
-    "That's outside what I can help with here — please reach out to your Kaltura account manager, or Kaltura sales at sales@kaltura.com, for pricing.");
+    "For pricing, please reach out to your Kaltura account manager.");
+  assert.equal(r.pass, true);
+});
+test('restrictedTopicRefusal: redirect to sales@kaltura.com passes on that phrase alone', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    "For pricing, please contact Kaltura sales at sales@kaltura.com.");
   assert.equal(r.pass, true);
 });
 

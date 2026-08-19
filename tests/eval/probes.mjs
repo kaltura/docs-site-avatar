@@ -83,8 +83,10 @@ const REFUSAL_PHRASES = [
   'cannot provide any information regarding pricing',
   'cannot provide any information regarding licensing',
   // the account-manager/sales@kaltura.com redirect obeyRules now points to, replacing the
-  // older corp.kaltura.com pointer.
-  'account manager',
+  // older corp.kaltura.com pointer. Scoped to "kaltura account manager" rather than the bare
+  // "account manager" — the bare phrase is generic enough to false-match a non-refusal reply
+  // that happens to mention an account manager for an unrelated reason.
+  'kaltura account manager',
   'sales@kaltura.com',
 ];
 
