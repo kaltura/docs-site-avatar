@@ -88,7 +88,7 @@ Run a full `node tests/eval/run.mjs` afterward to confirm the new dimension beha
 ## Update the pinned SDK version
 
 ```bash
-node scripts/fetch-sdk.mjs --tag v1.1.0 --force
+node scripts/fetch-sdk.mjs --tag v1.2.0 --force
 ```
 
 Or set `SDK_TAG` in the environment and re-run `npm run fetch-sdk` without `--tag`. There's no build step to catch an incompatible SDK API change at compile time, so re-run the unit tests and a full live eval afterward:
