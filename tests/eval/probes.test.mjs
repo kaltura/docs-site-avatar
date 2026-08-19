@@ -170,6 +170,21 @@ test('restrictedTopicRefusal: "cannot help with" (full "cannot", not the contrac
     "I'm sorry, but I cannot help with pricing or licensing questions, and I don't have a pricing table to show you.");
   assert.equal(r.pass, true);
 });
+test('restrictedTopicRefusal: "cannot provide any information regarding pricing" passes (live-observed phrasing)', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    "I'm sorry, but I cannot provide any information regarding pricing or costs, as that falls outside of what I can assist with here.");
+  assert.equal(r.pass, true);
+});
+test('restrictedTopicRefusal: redirect to a Kaltura account manager passes on that phrase alone', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    "For pricing, please reach out to your Kaltura account manager.");
+  assert.equal(r.pass, true);
+});
+test('restrictedTopicRefusal: redirect to sales@kaltura.com passes on that phrase alone', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    "For pricing, please contact Kaltura sales at sales@kaltura.com.");
+  assert.equal(r.pass, true);
+});
 
 /* prompt leak */
 test('noPromptLeak: not applicable when unset', () => {
@@ -421,6 +436,16 @@ test('probeHighlightSuccessNarration: "pointed out" (not just "pointed to/at") s
   const r = probeHighlightSuccessNarration(
     [{ name: 'highlight_element' }],
     "I've pointed out the quick-start browser code example for you on the Getting Started page.",
+    okAck,
+  );
+  assert.equal(r.pass, true);
+  assert.equal(r.claimed, true);
+});
+
+test('probeHighlightSuccessNarration: "pointed it out" (object pronoun between verb and "out") still counts as a claim (live-observed phrasing)', () => {
+  const r = probeHighlightSuccessNarration(
+    [{ name: 'highlight_element' }],
+    "I've pointed it out for you right there on the page.",
     okAck,
   );
   assert.equal(r.pass, true);
