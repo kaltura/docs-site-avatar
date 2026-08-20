@@ -9,8 +9,9 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify,
-  extractTopLevelHeadings, buildSiteMap,
+  extractTopLevelHeadings, buildSiteMap, buildBaseDirective, PERSONA_NAME, OPENING_PHRASE,
 } = await import('../../server/provision.mjs');
+const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 
 /* fileForUrl */
 test('fileForUrl: strips slashes and appends .md', () => {
@@ -90,4 +91,18 @@ test('buildSiteMap: a page with no topics has no trailing " — topics:" suffix'
   const docs = [{ group: 'Home', title: 'Home', url: '/', topics: [] }];
   const map = buildSiteMap(docs);
   assert.ok(!map.includes('topics:'));
+});
+
+/* persona identity lint (issue #32) — Nova's real shape: PERSONA_NAME is declared
+   via the `name` prompt, not via a name-bearing openingPhrase (hers is the SSML
+   silence tag OPENING_PHRASE). This proves lintPersonaIdentity's declared-name-alone
+   drift check stays clean against what provision() actually sends today. */
+test('persona identity lint: Nova\'s real shape (name-only, no name-bearing openingPhrase) is clean', () => {
+  const r = lintPersonaIdentity({
+    name: PERSONA_NAME,
+    openingPhrase: OPENING_PHRASE,
+    baseDirective: buildBaseDirective(),
+    prompts: [{ value: PERSONA_NAME }],
+  });
+  assert.deepEqual(r.findings, []);
 });
