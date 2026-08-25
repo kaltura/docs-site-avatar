@@ -119,6 +119,51 @@ test('splitIntoSections: sub-chunk ### heading strips CommonMark closing hashes 
   const chunks = splitIntoSections(md, { url: '/p/' });
   assert.match(chunks[2], /Section anchor id on that page: sub-one\n/);
 });
+test('splitIntoSections: heading-only preamble folds into the first ### sub-chunk (no degenerate chunk)', () => {
+  // ## heading immediately followed by the first ### — no prose between them.
+  const md = `# Page\n\nIntro.\n\n## Big Bare\n\n### First Sub\n\n${filler(SUBCHUNK_THRESHOLD)}\n\n### Second Sub\n\nTail body.`;
+  const chunks = splitIntoSections(md, { url: '/p/' });
+  assert.equal(chunks.length, 3); // intro + merged(##+first ###) + second ###
+  // Merged chunk carries the parent section's own anchor and contains both headings.
+  assert.match(chunks[1], /Section anchor id on that page: big-bare\n/);
+  assert.ok(chunks[1].includes('## Big Bare'));
+  assert.ok(chunks[1].includes('### First Sub'));
+  assert.ok(!chunks[1].includes('Part of section:'));
+  assert.match(chunks[2], /Part of section: Big Bare\nSection anchor id on that page: second-sub\n/);
+});
+test('splitIntoSections: heading-like lines inside code fences never split (## and ### levels)', () => {
+  const md = [
+    '# Page', '', 'Intro.', '',
+    '## Real Section', '',
+    '```md', '## fenced fake h2', '### fenced fake h3', '```', '',
+    `Body. ${filler(SUBCHUNK_THRESHOLD)}`, '',
+    '### Real Sub', '',
+    '~~~', '### tilde-fenced fake h3', '~~~', '',
+    'Sub body.',
+  ].join('\n');
+  const chunks = splitIntoSections(md, { url: '/p/' });
+  assert.equal(chunks.length, 3); // intro + ## preamble (with fence intact) + one real ### sub
+  assert.ok(chunks[1].includes('## fenced fake h2'));
+  assert.ok(chunks[1].includes('### fenced fake h3'));
+  assert.ok(chunks[2].includes('### tilde-fenced fake h3'));
+  assert.ok(!chunks.some((c) => /Section anchor id on that page: fenced-fake/.test(c)));
+});
+test('splitIntoSections: concatenated chunk bodies reconstruct the full source (nothing lost)', () => {
+  const src = oversizedSectionDoc();
+  const chunks = splitIntoSections(src, { url: '/api/' });
+  // Strip each chunk's injected provenance header (everything through the blank line after it).
+  const bodies = chunks.map((c, i) => (i === 0 ? c : c.replace(/^# API Page\n(?:Page path|Part of section|Section anchor id on that page)[^]*?\n\n/, '')));
+  const rebuilt = bodies.join('\n\n');
+  const normalize = (t) => t.replace(/\n{2,}/g, '\n\n').trim();
+  assert.equal(normalize(rebuilt), normalize(src));
+});
+test('splitIntoSections: an oversized final ### sub-chunk stays whole (no deeper recursion)', () => {
+  const md = `# Page\n\nIntro.\n\n## Big\n\nPreamble. ${filler(SUBCHUNK_THRESHOLD)}\n\n### Huge Sub\n\n${filler(SUBCHUNK_THRESHOLD + 500)}\n\n#### Deeper\n\nDeep body.`;
+  const chunks = splitIntoSections(md, { url: '/p/' });
+  assert.equal(chunks.length, 3); // intro + ## preamble + one ### sub, however large
+  assert.ok(chunks[2].length > SUBCHUNK_THRESHOLD);
+  assert.ok(chunks[2].includes('#### Deeper'));
+});
 
 /* buildSiteMap */
 test('buildSiteMap: groups pages by nav group and lists path + cite URL', () => {

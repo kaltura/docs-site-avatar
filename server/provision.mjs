@@ -119,10 +119,36 @@ export function stripFrontmatter(text) {
  */
 export const SUBCHUNK_THRESHOLD = 6000;
 
+/** Split at lines starting with `prefix` (`## ` / `### `), fence-aware: a heading-looking
+ * line inside a ``` / ~~~ fenced code block is literal text, not a boundary — splitting
+ * there would emit a chunk that opens mid-fence with a provenance slug for an anchor
+ * markdown-it-anchor never creates. Byte-preserving apart from the consumed boundary
+ * newline, exactly like the `\n(?=prefix)` regex split this replaces. */
+function splitAtHeadings(text, prefix) {
+  const lines = text.split('\n');
+  const parts = [];
+  let current = [];
+  let fence = null;
+  for (const line of lines) {
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!fence) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+    } else if (!fence && line.startsWith(prefix) && current.length) {
+      parts.push(current.join('\n'));
+      current = [];
+    }
+    current.push(line);
+  }
+  parts.push(current.join('\n'));
+  return parts;
+}
+
 export function splitIntoSections(markdown, doc) {
   const titleMatch = markdown.match(/^#\s+(.+)$/m);
   const title = titleMatch ? titleMatch[1].trim() : '';
-  const sections = markdown.split(/\n(?=## )/);
+  const sections = splitAtHeadings(markdown, '## ');
   const chunks = [];
   sections.forEach((section, i) => {
     if (i === 0 || !title) {
@@ -139,7 +165,13 @@ export function splitIntoSections(markdown, doc) {
     const heading = headingMatch ? stripClosingHashes(headingMatch[1]) : '';
     const provenance = (slug, parentHeading) => `# ${title}\nPage path: ${doc.url}${parentHeading ? `\nPart of section: ${parentHeading}` : ''}${slug ? `\nSection anchor id on that page: ${slug}` : ''}`;
     if (section.length > SUBCHUNK_THRESHOLD && /^### /m.test(section)) {
-      const subs = section.split(/\n(?=### )/);
+      let subs = splitAtHeadings(section, '### ');
+      // A preamble that is only the `## ` heading line (no prose before the first `### `)
+      // would embed as a heading-only chunk with nothing retrievable — fold it into the
+      // first sub-chunk instead, which then anchors to the parent section itself.
+      if (subs.length > 1 && /^##[^\n]*$/.test(subs[0].trim())) {
+        subs = [`${subs[0].trim()}\n\n${subs[1]}`, ...subs.slice(2)];
+      }
       subs.forEach((sub, j) => {
         if (j === 0) {
           // The `## ` heading + whatever preamble precedes the first `### ` — anchored to the
@@ -253,7 +285,8 @@ const KEY_FACTS = `
 - Package: @kaltura/intelligent-agents — a zero-runtime-dependency JavaScript SDK (ESM + JSDoc) for building and operating Kaltura Agentic Avatars.
 - Two entry points: ./management (provision/configure/measure agents, server-side) and ./experience (the live socket+WHEP runtime, browser).
 - Optional plugin subpaths that don't bloat the base runtime: ./experience/presenter (deck-walkthrough), ./experience/genui (widget rendering), ./experience/analytics (KAVA events), ./experience/noise-suppressor (AudioWorklet noise gate).
-- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag (e.g. .../gh/kaltura/intelligent-agents-sdk@v1.0.0/src/experience/index.js) for a stable, forever-cached import; @latest is fine only for quick prototyping, never for production.
+- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.4.1 (.../gh/kaltura/intelligent-agents-sdk@v1.4.1/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
+- Client-supplied request_vars sent WITH a converse message are gated: the intellect must have allow_client_variables set to true (toggle via intellects.setClientVariablesEnabled), otherwise converse rejects them with HTTP 403, which the SDK surfaces as a typed client_variables_disabled error. Reserved sys__ variables (like sys__user_id) are server-injected every turn and rejected if a client tries to set them, regardless of that gate.
 - License: MIT. No Kaltura account is needed to read, fork, or build on the source; a Kaltura account with the Agentic Avatar feature enabled is needed to call the live APIs it wraps.
 - Security posture: pre-redacted audit events, short-lived tokens, a NIST 800-53 control matrix — designed for enterprise, HIPAA, and HITRUST deployments.
 - You, Nova, are yourself a live example of what this SDK builds: provisioned via the SDK's own Management API, grounded on this site's own docs through the SDK's Knowledge feature, and running on the SDK's own Experience runtime.

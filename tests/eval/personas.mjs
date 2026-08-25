@@ -185,7 +185,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'How do I fetch the full transcript of a past conversation thread, and what format does the transcript come back in?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['plain text', 'human', 'per line', 'get_transcripts', 'transcript method', 'threads.transcript'],
+          relevanceAny: ['plain text', 'plain-text', 'human', 'per line', 'get_transcripts', 'transcript method', 'threads.transcript'],
         },
         {
           prompt: 'Is there any cap on how long a thread’s history can grow, and what does that mean for my per-turn cost?',
