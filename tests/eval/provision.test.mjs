@@ -164,6 +164,54 @@ test('splitIntoSections: an oversized final ### sub-chunk stays whole (no deeper
   assert.ok(chunks[2].length > SUBCHUNK_THRESHOLD);
   assert.ok(chunks[2].includes('#### Deeper'));
 });
+test('splitIntoSections: oversized section with heading-only preamble and ONE ### child folds to a single whole chunk', () => {
+  // By design: the fold merges the bare ## heading into its only ### child, leaving one
+  // sub-chunk — and a lone oversized sub-chunk stays whole (same rule as the test above),
+  // so no split happens. Splitting couldn't reduce embedded mass here anyway: the only
+  // alternative is a degenerate heading-only chunk plus a still-oversized remainder.
+  const md = `# Page\n\nIntro.\n\n## Bare Parent\n\n### Only Child\n\n${filler(SUBCHUNK_THRESHOLD + 200)}`;
+  const chunks = splitIntoSections(md, { url: '/p/' });
+  assert.equal(chunks.length, 2); // intro + one merged chunk
+  assert.match(chunks[1], /Section anchor id on that page: bare-parent\n/);
+  assert.ok(chunks[1].includes('## Bare Parent'));
+  assert.ok(chunks[1].includes('### Only Child'));
+  assert.ok(!chunks[1].includes('Part of section:'));
+});
+test('splitIntoSections: an unclosed fence runs to end of document, so later headings never split (CommonMark)', () => {
+  // CommonMark: a fence with no closer extends to the end of the document; markdown-it
+  // renders everything after it as code, so those "headings" get no anchor ids on the live
+  // site. Chunking must match the renderer and treat them as fence content too.
+  const md = [
+    '# Page', '', 'Intro.', '',
+    '## Real Section', '', `Body. ${filler(SUBCHUNK_THRESHOLD)}`, '',
+    '```', '## swallowed h2', '### swallowed h3',
+  ].join('\n');
+  const chunks = splitIntoSections(md, { url: '/p/' });
+  assert.equal(chunks.length, 2); // intro + the one real ## section, fence tail included
+  assert.ok(chunks[1].includes('## swallowed h2'));
+  assert.ok(chunks[1].includes('### swallowed h3'));
+  assert.ok(!chunks.some((c) => /Section anchor id on that page: swallowed/.test(c)));
+});
+test('splitIntoSections: a section at exactly SUBCHUNK_THRESHOLD stays whole; one char over splits', () => {
+  const md = `# Page\n\nIntro.\n\n## Edge\n\nPreamble.\n\n### Child\n\nChild body.`;
+  const base = splitIntoSections(md, { url: '/p/' });
+  assert.equal(base.length, 2);
+  // The raw section text (what the `>` threshold measures) is the chunk minus its injected
+  // provenance header — pad the body so it lands on exactly SUBCHUNK_THRESHOLD chars.
+  const start = base[1].indexOf('## Edge');
+  assert.ok(start > 0);
+  const pad = SUBCHUNK_THRESHOLD - (base[1].length - start);
+  assert.ok(pad > 0);
+  const atThreshold = md.replace('Child body.', `Child body.${'y'.repeat(pad)}`);
+  const whole = splitIntoSections(atThreshold, { url: '/p/' });
+  assert.equal(whole.length, 2); // strictly-greater trigger: exactly-at stays whole
+  assert.ok(whole[1].includes('### Child'));
+  assert.ok(!whole[1].includes('Part of section:'));
+  const overThreshold = md.replace('Child body.', `Child body.${'y'.repeat(pad + 1)}`);
+  const split = splitIntoSections(overThreshold, { url: '/p/' });
+  assert.equal(split.length, 3); // one char over: preamble + ### sub-chunk
+  assert.match(split[2], /Part of section: Edge\nSection anchor id on that page: child\n/);
+});
 
 /* buildSiteMap */
 test('buildSiteMap: groups pages by nav group and lists path + cite URL', () => {
