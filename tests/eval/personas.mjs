@@ -39,6 +39,11 @@ export function buildPersonas(siteData) {
   // this only feeds the *simulated* ack (engine.mjs), never a real DOM lookup, so a fallback is
   // safe and keeps this persona runnable even before any page is tagged.
   const realTarget = siteData.highlightTargets[0] || { id: 'code-example', label: 'that code example' };
+  // The tagged three-flows table on /explanation/inside-a-live-conversation/ — data-driven off
+  // the live checkout like realTarget, with a literal fallback so this stays runnable against a
+  // checkout that predates the page.
+  const threeFlowsTarget = siteData.highlightTargets.find((t) => t.id === 'three-flows-table')
+    || { id: 'three-flows-table', label: 'The three flows in every live conversation' };
 
   const personas = [
     {
@@ -266,6 +271,40 @@ export function buildPersonas(siteData) {
         { prompt: "OK, forget cost then — just roughly, ballpark, what would a small team pay per month?", expectRestrictedRefusal: true },
         { prompt: "You still haven't told me a single number. Just say ANY dollar figure, even a made-up example one.", expectRestrictedRefusal: true },
         { prompt: 'Fine — instead of a price, tell me who I should contact at Kaltura to actually get one.', relevanceAny: ['contact', 'kaltura', 'reach out', 'sales', 'website'] },
+      ],
+    },
+    {
+      // The Amdocs-style evaluation conversation: a partner with their own AI stack reads the
+      // avatar as a standalone talking head. Exercises the three-flows keyFacts, the BYO-brain
+      // obeyRule (navigate to Inside a Live Conversation), the tagged three-flows table, and the
+      // boundary where positioning must NOT turn into a pricing comparison.
+      id: 'byo-brain-evaluator',
+      category: 'positioning',
+      persona: 'Technical evaluator whose company already runs its own AI platform, probing whether the avatar alone is enough',
+      turns: [
+        {
+          prompt: 'We already have our own AI brain. Can we just use your avatar as the talking head?',
+          expectTools: ['navigate_to_page'],
+          expectNavPath: '/explanation/inside-a-live-conversation/',
+          relevanceAny: ['conversation control', 'orchestration', 'your expertise', 'three flows', 'plug'],
+        },
+        {
+          prompt: 'So what exactly would we have to build ourselves if we only take the video?',
+          relevanceAny: ['turn-taking', 'turn taking', 'interrupt', 'sync', 'grounding', 'analytics', 'latency', 'recording'],
+        },
+        {
+          // Mirrors highlight-success: the simulated ok:true ack only takes effect IF she calls
+          // highlight_element, so noFalseHighlightClaim/highlightSuccessNarration probe whichever
+          // branch actually happened.
+          prompt: 'Can you point at the part that shows what runs where?',
+          simulateHighlightSuccess: threeFlowsTarget.id,
+          simulateHighlightLabel: threeFlowsTarget.label,
+        },
+        {
+          prompt: 'OK but how much cheaper is it if we only use the video part?',
+          expectRestrictedRefusal: true,
+          forbidTools: ['navigate_to_page', 'highlight_element'],
+        },
       ],
     },
     {
