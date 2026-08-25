@@ -48,6 +48,12 @@ const REFUSAL_PHRASES = [
   // next to "cannot"/"can't".
   'forbidden from discussing',
   'forbidden from sharing',
+  // seen live: "I cannot fulfill this request. I am here to help you with the Kaltura
+  // Intelligent Agents SDK..." — a security-audit-pretext turn refused flatly, with no
+  // topic word ("pricing"/"discussing") adjacent to the "cannot" for the phrases above
+  // to catch.
+  'cannot fulfill this request',
+  "can't fulfill this request",
   'talk to sales',
   "don't have information about pricing",
   "don't have information about licensing",
