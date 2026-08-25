@@ -1,7 +1,11 @@
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const DEFAULT_SITE_DIR = '/opt/homebrew/var/www/GitHub/intelligent-agents-sdk-site';
+// The sibling checkout docs/GETTING-STARTED.md tells contributors to create
+// (`git clone --branch gh-pages-src … ../intelligent-agents-sdk-site`), so the
+// documented layout works with zero config on any machine.
+const DEFAULT_SITE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'intelligent-agents-sdk-site');
 
 /**
  * Resolve the docs-site checkout (the `gh-pages-src` orphan branch of
@@ -11,7 +15,7 @@ const DEFAULT_SITE_DIR = '/opt/homebrew/var/www/GitHub/intelligent-agents-sdk-si
  * the admin secret this script uses must never live anywhere near it.
  *
  * `--site-dir <path>`/`--site-dir=<path>`, else `SITE_REPO_DIR` env var, else
- * this machine's actual sibling checkout path.
+ * the documented sibling checkout (`../intelligent-agents-sdk-site`).
  * @param {{argv?:string[], env?:NodeJS.ProcessEnv}} [opts]
  * @returns {string}
  */

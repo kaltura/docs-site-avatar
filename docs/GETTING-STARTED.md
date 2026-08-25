@@ -13,9 +13,11 @@ npm install
 `npm install` has nothing to install from the registry — this repo ships with zero npm dependencies — but its `postinstall` script fetches `@kaltura/intelligent-agents` from jsDelivr into a local `vendor/sdk/` directory. You'll see:
 
 ```
-Fetching @kaltura/intelligent-agents-sdk@v1.0.1 from jsDelivr into vendor/sdk ...
-Vendored 58 files at v1.0.1.
+Fetching @kaltura/intelligent-agents-sdk@<pinned tag> from jsDelivr into vendor/sdk ...
+Vendored <N> files at <pinned tag>.
 ```
+
+(The pinned tag is `DEFAULT_TAG` in `scripts/fetch-sdk.mjs`.)
 
 ## Configure credentials
 
@@ -33,7 +35,7 @@ Nova is grounded on the real markdown pages of the public docs site, and the eva
 git clone --branch gh-pages-src https://github.com/kaltura/intelligent-agents-sdk.git ../intelligent-agents-sdk-site
 ```
 
-Add the absolute path of that clone to `.env` as `SITE_REPO_DIR`. For example, if the command above put it at `/Users/you/code/intelligent-agents-sdk-site`, that's the value to set.
+The command above puts the clone at the default location (`../intelligent-agents-sdk-site`, a sibling of this repo), so nothing else is needed. If your checkout lives somewhere else, set its absolute path in `.env` as `SITE_REPO_DIR` (or pass `--site-dir <path>` per run).
 
 ## Provision Nova
 

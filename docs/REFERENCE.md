@@ -40,7 +40,7 @@
 | `fetch-sdk` | `node scripts/fetch-sdk.mjs --force` | write, idempotent (overwrites `vendor/sdk/` with the same tag's content) |
 | `provision` | `node server/provision.mjs` | write, NOT idempotent (creates a new intellect/avatar/agent/knowledge base every run — see `--reuse`/`--agent-id`/`--avatar-id` below to update in place instead) |
 | `cleanup` | `node server/provision.mjs --cleanup` | write, destructive |
-| `test:eval:unit` | `node --test tests/eval/probes.test.mjs` | read |
+| `test:eval:unit` | `node --test tests/eval/probes.test.mjs tests/eval/provision.test.mjs` | read |
 | `eval` | `node tests/eval/run.mjs` | read (drives the live agent conversationally; writes only to `tests/eval/artifacts/`) |
 | `eval:dashboard` | `node tests/eval/dashboard/server.mjs` | read (starts a local server; each run it launches carries the same capability as `eval`) |
 
@@ -74,7 +74,7 @@ Exits non-zero when `summary.healthy` is false (any release-blocking failure or 
 
 | Flag / env | Effect |
 |---|---|
-| `--tag vX.Y.Z` / `--tag=vX.Y.Z` | Vendor this tag instead of the default (`v1.0.1`) |
+| `--tag vX.Y.Z` / `--tag=vX.Y.Z` | Vendor this tag instead of the default (`DEFAULT_TAG` in `scripts/fetch-sdk.mjs`) |
 | `SDK_TAG` | Same, read when `--tag` is omitted |
 | `--force` | Re-fetch even if `vendor/sdk/.sdk-tag` already matches the target tag |
 
@@ -85,7 +85,7 @@ See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why these are shaped this way, a
 | Workflow | Trigger | Gate | Secrets read from |
 |---|---|---|---|
 | `redeploy.yml` | Push to `server/provision.mjs` on `main`; `workflow_dispatch` | `production` environment, required reviewers | `production` environment secrets |
-| `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` with a `trials` input | None | Repository secrets |
+| `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` with a `trials` input | `production` environment, required reviewers (a `workflow_run` trigger queues the eval; it runs after approval) | `production` environment secrets |
 
 Both need `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET` defined in whichever secrets scope they read from — see HOW-TO.md's "Set up this repo's CI secrets."
 
@@ -97,7 +97,7 @@ Everything a fresh clone needs is in `.env.example`; this table is what each one
 |---|---|---|
 | `AGENTIC_PARTNER_ID` | Yes | Partner ID for every `Management` call (`provision.mjs`, `run.mjs`, the dashboard) |
 | `AGENTIC_ADMIN_SECRET` | Yes | Admin secret paired with the partner ID above. Never commit a real value |
-| `SITE_REPO_DIR` | No | Overrides the default docs-site checkout path `site-root.mjs` resolves to. Flag (`--site-dir`) takes precedence over this; this takes precedence over the hardcoded default |
+| `SITE_REPO_DIR` | No | Overrides the default docs-site checkout path `site-root.mjs` resolves to. Flag (`--site-dir`) takes precedence over this; this takes precedence over the default sibling checkout (`../intelligent-agents-sdk-site`) |
 | `AGENTIC_GENIE_URL` | No | Overrides the Genie conversation backend `transport.mjs` posts tool-call ACKs to. Defaults to production |
 | `NOVA_DASHBOARD_PORT` | No | Port for `npm run eval:dashboard`. Defaults to `8093`. The dashboard also accepts a positional CLI arg (`node tests/eval/dashboard/server.mjs 9000`), checked before this env var |
 
