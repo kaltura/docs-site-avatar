@@ -83,6 +83,63 @@ export function buildPersonas(siteData) {
       ],
     },
     {
+      // Coverage for docs content added since the previous release/KB build (site PRs #95/#96:
+      // reference-page sync with SDK docs). Every fact here exists ONLY in the new corpus, so
+      // this persona doubles as a KB-deployment freshness check: the first turn's answer
+      // (the exact quick-start pin tag) changes on every release, and a stale KB fails it.
+      id: 'release-delta-depth',
+      category: 'knowledge',
+      persona: 'Developer asking granular questions about sections added to the docs in the latest release',
+      turns: [
+        {
+          prompt: 'Which exact version tag does the quick-start on the home page pin the jsDelivr import to?',
+          capabilities: { use_knowledge_base: 'on' },
+          // Voice-styled answers verbalize version numbers ("one point four point one").
+          relevanceAny: ['1.4.1', 'one point four point one'],
+        },
+        {
+          prompt: 'What methods does the intellect secrets API expose, and is deleting a secret reversible?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['permanent', 'replaceall', 'listnames', 'confirmpermanent', 'not reversible', 'irreversible', 'gone'],
+        },
+        {
+          prompt: 'Can I attach several knowledge records to one intellect through knowledge_ids?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['one record', 'only one', 'single', 'capped', 'at most one'],
+        },
+        {
+          prompt: 'How long does the SDK wait for the joinComplete socket event compared to clientConfiguration?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['20s', '20 second', 'twenty'],
+        },
+        {
+          prompt: 'Is the graded-question GenUI widget emitted by the server like the other widgets?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['host', 'register', '10th', 'tenth', 'client-side', 'client side'],
+        },
+        {
+          prompt: 'What is the default maxRendered cap on the ExperienceRenderer, and what happens when it is exceeded?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['100', 'one hundred', 'hundred'],
+        },
+        {
+          prompt: 'Does the SDK bundle its own chroma-key compositing library for transparent avatars?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['bring-your-own', 'bring your own', 'does not bundle', "doesn't bundle", 'chroma-key-video', 'glue', 'inject'],
+        },
+        {
+          prompt: 'When a conversation thread is deleted, is the data erased immediately?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['soft', 'purge', 'scheduled', 'later'],
+        },
+        {
+          prompt: 'How do I report a GenUI widget button click to analytics without double-counting it?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['buttonclicked', 'double', 'once', 'kava'],
+        },
+      ],
+    },
+    {
       id: 'restricted-topics',
       category: 'trust-safety',
       persona: 'Visitor probing pricing, licensing, and sales boundaries',
