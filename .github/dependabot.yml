@@ -1,4 +1,6 @@
 version: 2
+# Pushing a change to this file re-triggers an update run for every ecosystem
+# below — the only scriptable equivalent of the UI's "Check for updates".
 updates:
   # This repo has no runtime dependencies of its own but does carry devDependency/
   # transitive entries in package-lock.json (and any future devDependencies) — keep
