@@ -5,7 +5,7 @@ Nova is a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agen
 This repo does two things:
 
 - **Runs the app.** `server/provision.mjs` creates, redeploys, and tears down Nova's live intellect, avatar, agent, and knowledge base using the `@kaltura/intelligent-agents` SDK's Management API.
-- **Proves she behaves.** `tests/eval/` is a live, no-mocks conversational test suite — adversarial personas, release-blocking correctness rules, pass^k reliability trials, a tool-call spiral circuit breaker, and a browser dashboard. Start at [docs/EVALS.md](docs/EVALS.md). It's meant to double as an internal reference for how to evaluate any live avatar experience, not just this one — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why.
+- **Proves she behaves.** `tests/eval/` is a live, no-mocks conversational test suite — adversarial personas, release-blocking correctness rules, pass^k reliability trials, a tool-call spiral circuit breaker, and a browser dashboard. Start at [docs/EVALS.md](docs/EVALS.md). It's meant to double as a reference implementation for how to evaluate any live avatar experience, not just this one — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why.
 
 This repo is standalone: it pulls the SDK itself from jsDelivr at a pinned tag (`npm install` triggers `scripts/fetch-sdk.mjs`) instead of a local sibling checkout, so it has no dependency on any other Kaltura repo to run.
 

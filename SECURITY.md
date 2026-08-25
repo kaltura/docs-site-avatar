@@ -25,7 +25,8 @@ that site's own repo/branch).
 ## Reporting a vulnerability
 
 Email `security@kaltura.com` with details and a proof of concept if you have
-one. Please do not open a public GitHub issue for an undisclosed
+one, or open a private GitHub Security Advisory from this repo's Security
+tab. Please do not open a public GitHub issue for an undisclosed
 vulnerability, since this repo's eval suite and provisioning scripts operate
 against a real production agent. We acknowledge within a few business days
 and coordinate disclosure before any public write-up.
@@ -42,15 +43,17 @@ and coordinate disclosure before any public write-up.
 - `server/agent.json` (the provisioned resource IDs) is committed on
   purpose — it's runtime state, not a secret, and CI needs it on disk to
   redeploy the same live intellect/agent/avatar rather than minting new ones.
-- Nova's knowledge base is provisioned with `use_knowledge_base:'off'` and
-  stays that way on every redeploy — see
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why, and what's required
-  before that's ever turned on.
-- `tests/eval/` contains adversarial jailbreak prompts and the exact refusal
-  phrasing this agent relies on. Treat additions to it with the same care as
-  the rest of this repo's sensitive surface — that sensitivity is why this
-  eval suite lives in its own private repo instead of alongside the public
-  SDK/docs site.
+- Nova's knowledge base starts `use_knowledge_base:'off'` and `provision.mjs`
+  flips it on automatically once indexing is confirmed ready — see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why, and for the
+  cache-propagation caveat on a `--reuse` redeploy.
+- `tests/eval/` contains real adversarial jailbreak prompts and the exact
+  refusal phrasing this agent relies on. That's published on purpose, as
+  worked reference material — see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "eval harness as a reusable
+  pattern." Treat *new* additions to it with the same care: no real
+  credentials, no other party's private data, and nothing crafted to attack
+  a different live system.
 
 For the SDK's own security posture (token model, audit logging, transport
 hardening, compliance crosswalks), see

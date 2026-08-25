@@ -2,7 +2,9 @@
 
 ## About this repo's standalone design
 
-This app used to live inside a larger internal monorepo (now archived) alongside unrelated apps and the SDK's own source. It was pulled out into its own repo because its eval suite is itself sensitive test surface — adversarial jailbreak prompts, internal tool descriptions, the exact refusal phrasing this agent relies on — worth keeping private on its own, not bundled with anything public.
+This app used to live inside a larger internal monorepo (now archived) alongside unrelated apps and the SDK's own source. It was pulled into its own repo mainly for operational separation: this app needs live production credentials (`AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET`) and its own CI/release cadence, which the zero-dependency SDK repo has no reason to carry, and vice versa.
+
+The eval suite's adversarial content — jailbreak prompts, the exact refusal phrasing Nova relies on — is published here on purpose, as worked reference material for building an eval harness for your own live avatar app. See "About the eval harness as a reusable pattern" below.
 
 Because of that split, the SDK dependency couldn't stay a relative disk path into a sibling checkout. Three alternatives existed: publish the SDK to the npm registry (it's deliberately private on npm — it ships to browsers via jsDelivr's GitHub-CDN mode instead), add it as a git submodule (extra clone/update friction for a plain `npm install` workflow), or vendor it. `scripts/fetch-sdk.mjs` vendors it: it downloads the SDK's `src/` tree from jsDelivr at a pinned tag into a gitignored `vendor/sdk/`, the same CDN and pinning scheme the docs site's own browser-side `connect.js` already uses. This runs automatically via `postinstall`, so `npm install` alone leaves the repo fully runnable — no other Kaltura repo needs to exist on disk. (Node has no stable way to import directly from a network URL at runtime, which is why this is a fetch-once-to-disk step rather than a live import.)
 
