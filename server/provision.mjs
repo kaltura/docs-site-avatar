@@ -106,13 +106,29 @@ export function stripFrontmatter(text) {
  * unrelated content. Splitting at the same `## ` boundaries the site already
  * renders as sections is the only lever Path A leaves for keeping each
  * embedding scoped enough for RAG to actually hit that detail.
+ *
+ * The same drowning failure recurs one level down (issue #42): a single `## `
+ * section can itself run to many KB (api-reference's "Phase 2 — Build" is
+ * ~19KB across nine `### ` subsections), and one embedding for all of it lost
+ * the Converse gate row (`allow_client_variables`) to the surrounding
+ * subsections' bulk — Nova retrieved a Converse-adjacent chunk and answered
+ * from priors. So any `## ` section longer than SUBCHUNK_THRESHOLD that has
+ * `### ` subsections is split again at those boundaries, each sub-chunk
+ * carrying the same provenance plus its parent section's title (markdown-it-
+ * anchor ids every heading level, so a `### ` slug is a real live anchor too).
  */
+export const SUBCHUNK_THRESHOLD = 6000;
+
 export function splitIntoSections(markdown, doc) {
   const titleMatch = markdown.match(/^#\s+(.+)$/m);
   const title = titleMatch ? titleMatch[1].trim() : '';
   const sections = markdown.split(/\n(?=## )/);
-  return sections.map((section, i) => {
-    if (i === 0 || !title) return section.trim();
+  const chunks = [];
+  sections.forEach((section, i) => {
+    if (i === 0 || !title) {
+      chunks.push(section.trim());
+      return;
+    }
     // Every non-first chunk gets its page's path AND its own section's anchor id folded into
     // the text itself — not just the title as before — since async_search_knowledge_base's
     // result is plain retrieved prose with no structured (page, anchor) pointer of its own (it's
@@ -121,10 +137,25 @@ export function splitIntoSections(markdown, doc) {
     // navigate_to_page + highlight_element instead of the brain re-guessing an id from prose.
     const headingMatch = section.match(/^##\s+(.+)$/m);
     const heading = headingMatch ? stripClosingHashes(headingMatch[1]) : '';
-    const slug = heading ? githubSlugify(heading) : '';
-    const provenance = `# ${title}\nPage path: ${doc.url}${slug ? `\nSection anchor id on that page: ${slug}` : ''}`;
-    return `${provenance}\n\n${section}`.trim();
+    const provenance = (slug, parentHeading) => `# ${title}\nPage path: ${doc.url}${parentHeading ? `\nPart of section: ${parentHeading}` : ''}${slug ? `\nSection anchor id on that page: ${slug}` : ''}`;
+    if (section.length > SUBCHUNK_THRESHOLD && /^### /m.test(section)) {
+      const subs = section.split(/\n(?=### )/);
+      subs.forEach((sub, j) => {
+        if (j === 0) {
+          // The `## ` heading + whatever preamble precedes the first `### ` — anchored to the
+          // parent section itself, no "Part of section" line (it IS the section).
+          chunks.push(`${provenance(heading ? githubSlugify(heading) : '')}\n\n${sub}`.trim());
+          return;
+        }
+        const subMatch = sub.match(/^###\s+(.+)$/m);
+        const subHeading = subMatch ? stripClosingHashes(subMatch[1]) : '';
+        chunks.push(`${provenance(subHeading ? githubSlugify(subHeading) : '', heading)}\n\n${sub}`.trim());
+      });
+      return;
+    }
+    chunks.push(`${provenance(heading ? githubSlugify(heading) : '')}\n\n${section}`.trim());
   });
+  return chunks;
 }
 
 /** CommonMark ATX headings allow an optional closing `#` sequence (preceded by whitespace,
