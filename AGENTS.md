@@ -6,6 +6,8 @@ Quick orientation for a coding agent working in this repo. It's a pointer to the
 
 Nova: a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agents` public docs site. This repo provisions/redeploys her (`server/provision.mjs`) and proves she behaves with a live, no-mock conversational eval suite (`tests/eval/`).
 
+This repo is standalone (it vendors the SDK from jsDelivr, no local checkout needed to run it), but if you're touching `provision.mjs`'s `Management` calls, tool/capability names, or anything the SDK's own contract governs, cross-check against the SDK itself: [kaltura/intelligent-agents-sdk](https://github.com/kaltura/intelligent-agents-sdk) — its `API-REFERENCE.md` and `SDK_CONSTITUTION.md` are the source of truth for what's a real, verified field vs. an assumption.
+
 ## Before you touch anything
 
 - Zero runtime dependencies, plain ESM, no build step. `npm install`'s `postinstall` vendors the SDK from jsDelivr into gitignored `vendor/sdk/`.
