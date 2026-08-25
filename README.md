@@ -5,7 +5,7 @@ Nova is a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agen
 This repo does two things:
 
 - **Runs the app.** `server/provision.mjs` creates, redeploys, and tears down Nova's live intellect, avatar, agent, and knowledge base using the `@kaltura/intelligent-agents` SDK's Management API.
-- **Proves she behaves.** `tests/eval/` is a live, no-mocks conversational test suite — adversarial personas, release-blocking correctness rules, pass^k reliability trials, a tool-call spiral circuit breaker, and a browser dashboard. It's meant to double as an internal reference for how to evaluate any live avatar experience, not just this one — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why.
+- **Proves she behaves.** `tests/eval/` is a live, no-mocks conversational test suite — adversarial personas, release-blocking correctness rules, pass^k reliability trials, a tool-call spiral circuit breaker, and a browser dashboard. Start at [docs/EVALS.md](docs/EVALS.md). It's meant to double as an internal reference for how to evaluate any live avatar experience, not just this one — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why.
 
 This repo is standalone: it pulls the SDK itself from jsDelivr at a pinned tag (`npm install` triggers `scripts/fetch-sdk.mjs`) instead of a local sibling checkout, so it has no dependency on any other Kaltura repo to run.
 
@@ -32,6 +32,7 @@ For the full walkthrough with expected output at each step, see [docs/GETTING-ST
 | Doc | Read it when you want to… |
 |---|---|
 | [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | Go from a fresh clone to a passing eval run, step by step |
+| [docs/EVALS.md](docs/EVALS.md) | Test Nova: the commands, what the suite covers, and how the methodology works — in one skim |
 | [docs/HOW-TO.md](docs/HOW-TO.md) | Redeploy Nova, tear her down, add a persona or probe, update the pinned SDK version |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Understand how the pieces fit together, and why the eval harness is built the way it is |
 | [docs/REFERENCE.md](docs/REFERENCE.md) | Look up an npm script, a CLI flag, an env var, or an artifact file's shape |
