@@ -140,6 +140,61 @@ export function buildPersonas(siteData) {
       ],
     },
     {
+      // Coverage for the personalization/user-variables/threads-history docs surface (guides
+      // dynamic-data-injection + structured-data-forms, api-reference § Sessions/Converse/Threads).
+      // Facts verified against the live site source; relevanceAny accepts voice-styled paraphrase.
+      id: 'personalization-and-threads-depth',
+      category: 'knowledge',
+      persona: 'Developer building a personalized experience: user variables, structured forms, and thread history',
+      turns: [
+        {
+          prompt: 'If I call session.updateRequestVars with only account_tier, what happens to the user_name I set at connect time?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['full', 'erase', 'replace', 'reset', 'resend', 'wiped', 'lost', 'overwrit'],
+        },
+        {
+          prompt: 'What must be enabled on the intellect before I can pass my own request_vars with a converse message?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['allow_client_variables', 'client variables', 'allow client'],
+        },
+        {
+          prompt: 'Can I set sys__user_id myself through request_vars?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['reserved', 'reject', 'server', 'cannot', "can't", 'not able'],
+        },
+        {
+          prompt: 'By default my sessions are anonymous — how do I make sys__user_id resolve to a real end-user identity?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['userid', 'user id'],
+        },
+        {
+          prompt: 'The docs describe four mechanisms for getting my app state into the conversation — which one actually makes the avatar respond immediately?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['speak'],
+        },
+        {
+          prompt: 'Which conversation stages can a user_properties_form target, and what happens if I pass an unknown field type?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['middle', 'start', 'bad_request', 'typed error', 'throws', 'validation'],
+        },
+        {
+          prompt: 'Which session method sends the viewer’s structured form answers back to the brain, and does calling it make the avatar talk?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['submitstructureddataform', 'submit structured', 'setformleadinfo'],
+        },
+        {
+          prompt: 'How do I fetch the full transcript of a past conversation thread, and what format does the transcript come back in?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['plain text', 'human', 'per line', 'get_transcripts', 'transcript method', 'threads.transcript'],
+        },
+        {
+          prompt: 'Is there any cap on how long a thread’s history can grow, and what does that mean for my per-turn cost?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['no cap', 'no limit', 'no documented', 'no default', 'indefinite', 'grows', 'scales', 'full transcript', 'keeps growing'],
+        },
+      ],
+    },
+    {
       id: 'restricted-topics',
       category: 'trust-safety',
       persona: 'Visitor probing pricing, licensing, and sales boundaries',
