@@ -21,6 +21,7 @@
  *   SITE_REPO_DIR=/path/to/site node tests/eval/run.mjs
  *   node tests/eval/run.mjs --trials 3            # pass^k confidence run (3x live calls)
  *   node tests/eval/run.mjs --judge verdicts.json # fold in an external LLM-judge pass (see GUIDELINES.md)
+ *   node tests/eval/run.mjs --no-warmup           # skip the knowledge-retrieval warm-up gate
  *
  * Outputs (under tests/eval/artifacts/):
  *   transcript.json    raw turns (prompt, latency, text, toolCalls) — feed this to an LLM judge
@@ -39,6 +40,7 @@ import { loadEnv } from '../../load-env.mjs';
 import { loadSiteData } from './site-data.mjs';
 import { buildPersonas } from './personas.mjs';
 import { toolNames } from './probes.mjs';
+import { streamTurnWithAck } from './transport.mjs';
 import { runEval } from './engine.mjs';
 import { writeArtifacts } from './artifacts.mjs';
 
@@ -63,6 +65,50 @@ const judgeArg = process.argv.includes('--judge') ? process.argv[process.argv.in
 log(`▶ loaded ${siteData.routes.length} routes, ${siteData.highlightTargets.length} tagged highlight targets, ${siteData.headingTargets.length} heading targets (browser-only — this headless run can't exercise them) from ${siteData.siteDir}`);
 if (siteData.untaggedRoutes.length) log(`  (untagged pages, expected — not every page needs a highlight target: ${siteData.untaggedRoutes.map((r) => r.url).join(', ')})`);
 if (trials > 1) log(`▶ running ${trials} trials per persona for pass^k reliability gating`);
+
+/**
+ * Knowledge-retrieval warm-up gate. `isIndexed` reporting ready during provisioning does NOT
+ * mean fine-grained retrieval is warm: a CI eval that started 3s after a redeploy scored 65%
+ * relevance with every failing reply saying "couldn't find in the documentation", while the
+ * identical eval against the identical knowledge record passed 100% hours later. So before
+ * scoring anything, ask one section-granularity canary question that only the knowledge base
+ * (not keyFacts or the site map) can answer, and hold the run until the brain answers it.
+ * Proceeds with a loud warning if the window is exhausted — the eval then fails honestly.
+ */
+const WARMUP_PROMPT = 'What is the default maxRendered cap on the ExperienceRenderer?';
+const WARMUP_PASS = /\b100\b|hundred/i;
+const WARMUP_ATTEMPTS = 20;
+const WARMUP_DELAY_MS = 60_000;
+const WARMUP_TURN_TIMEOUT_MS = 30_000;
+
+async function warmUpKnowledgeRetrieval() {
+  for (let attempt = 1; attempt <= WARMUP_ATTEMPTS; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), WARMUP_TURN_TIMEOUT_MS);
+    let text = '';
+    try {
+      ({ text } = await streamTurnWithAck({ management, configId: agent.configId, message: WARMUP_PROMPT, routes: siteData.routes, signal: ctrl.signal }));
+    } catch (e) {
+      log(`  ! warm-up attempt ${attempt}/${WARMUP_ATTEMPTS} errored: ${e.message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (WARMUP_PASS.test(text)) {
+      log(`✓ knowledge retrieval warm (canary answered on attempt ${attempt})`);
+      return;
+    }
+    if (attempt < WARMUP_ATTEMPTS) {
+      log(`… knowledge retrieval still cold (attempt ${attempt}/${WARMUP_ATTEMPTS}) — waiting ${WARMUP_DELAY_MS / 1000}s`);
+      await new Promise((r) => setTimeout(r, WARMUP_DELAY_MS));
+    }
+  }
+  log(`⚠ knowledge retrieval still cold after ${WARMUP_ATTEMPTS} attempts (~${Math.round((WARMUP_ATTEMPTS * WARMUP_DELAY_MS) / 60000)} min) — running the eval anyway; expect relevance failures`);
+}
+
+if (!process.argv.includes('--no-warmup')) {
+  log('▶ warming up knowledge retrieval (a fresh redeploy can take a while to become searchable; --no-warmup to skip)');
+  await warmUpKnowledgeRetrieval();
+}
 
 const report = await runEval({
   management,
