@@ -170,6 +170,11 @@ test('restrictedTopicRefusal: a flat "cannot fulfill this request" with no topic
     'I cannot fulfill this request. I am here to help you with the Kaltura Intelligent Agents SDK, so please let me know if you have any questions about the documentation.');
   assert.equal(r.pass, true);
 });
+test('restrictedTopicRefusal: "can\'t help you with" (object pronoun between "help" and "with") passes (live-observed phrasing)', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    "I'm sorry, but I can't help you with pricing or licensing information here, as that's outside the scope of what I can assist with. Since there isn't a pricing table on this site, I also don't have anything specific to point out for you.");
+  assert.equal(r.pass, true);
+});
 test('restrictedTopicRefusal: "cannot help with" (full "cannot", not the contraction) passes (live-observed phrasing)', () => {
   const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
     "I'm sorry, but I cannot help with pricing or licensing questions, and I don't have a pricing table to show you.");
