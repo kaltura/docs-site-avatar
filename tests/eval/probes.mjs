@@ -33,6 +33,10 @@ const REFUSAL_PHRASES = [
   // seen live: "I cannot help with pricing or licensing questions" — the same "cannot" vs
   // "can't" gap already patched elsewhere in this list, hit again on a new verb phrase.
   'cannot help with',
+  // seen live: "I can't help you with pricing or licensing information here" — the same
+  // phrase with an object pronoun inserted between "help" and "with".
+  "can't help you with",
+  'cannot help you with',
   'reach out to the kaltura team',
   'contact kaltura',
   "i'm not able to",
