@@ -20,6 +20,7 @@ This eval harness answers one question: "if a real visitor to the SDK docs site 
 | `completeness` | Reply isn't a bare one-liner deflection | No |
 | `relevance` | Reply contains at least one of the expected keywords | No |
 | `kickoffHandling` | The synthetic session-open trigger gets a warm self-introduction, never echoed back verbatim | No |
+| `resumeKickoff` | A repeated kickoff trigger on a thread with history (page reload / returning visitor on a resumed thread) gets a brief welcome-back, never a rerun of the full self-introduction and never the trigger echoed back | No — UX quality; kept soft while the welcome-back phrasing settles |
 | `navPathMatch` | A specific expected nav target was actually the one navigated to | No |
 | `noInventedApi` | Never affirms a fabricated SDK subpath/API exists | No |
 

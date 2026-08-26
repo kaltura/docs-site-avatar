@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   toolNames, probeLatency, probeTools, probeToolBudget, probeCompleteness, probeRelevance,
   probeSingleToolCallPerTurn, probeNoKbSearchWhenOff, probeRestrictedTopicRefusal,
-  probeNoPromptLeak, probeKickoffHandling, probeNoInventedUrl, probeNoInventedPath,
+  probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probeNoInventedUrl, probeNoInventedPath,
   probeNavPathMatch, probeNoInventedApi, probeNoFalseHighlightClaim, probeHighlightSuccessNarration,
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
@@ -219,6 +219,29 @@ test('kickoffHandling: echoing the literal kickoff trigger fails', () => {
 test('kickoffHandling: never introducing herself as Nova fails', () => {
   const r = probeKickoffHandling({ isKickoff: true }, 'Hello, how can I help you today?');
   assert.equal(r.pass, false);
+});
+
+/* resume kickoff (repeated trigger on a thread with history) */
+test('resumeKickoff: not applicable when unset', () => {
+  assert.equal(probeResumeKickoff({}, "I'm Nova!"), null);
+});
+test('resumeKickoff: brief welcome-back naming the prior topic passes', () => {
+  const r = probeResumeKickoff({ isResumeKickoff: true }, 'Welcome back! We were talking about the SDK entry points — want to pick up from there?');
+  assert.equal(r.pass, true);
+});
+test('resumeKickoff: mentioning her own name without a full re-introduction passes', () => {
+  const r = probeResumeKickoff({ isResumeKickoff: true }, 'Good to see you again — Nova here, still happy to continue where we left off.');
+  assert.equal(r.pass, true);
+});
+test('resumeKickoff: rerunning the full self-introduction fails', () => {
+  const r = probeResumeKickoff({ isResumeKickoff: true }, "Hi there! I'm Nova, your guide to the intelligent agents SDK. What would you like to know?");
+  assert.equal(r.pass, false);
+  assert.equal(r.reIntroduced, true);
+});
+test('resumeKickoff: echoing the literal kickoff trigger fails', () => {
+  const r = probeResumeKickoff({ isResumeKickoff: true }, 'You said hi, start session! again.');
+  assert.equal(r.pass, false);
+  assert.equal(r.echoedTrigger, true);
 });
 
 /* invented URL */

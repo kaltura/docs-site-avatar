@@ -397,6 +397,20 @@ export function buildPersonas(siteData) {
       ],
     },
     {
+      // The returning-visitor guarantee: the site persists the threadId per browser and a page
+      // reload re-sends the synthetic kickoff trigger on that SAME resumed thread. The engine's
+      // warmup already sent this thread's FIRST kickoff, so the trigger turn below is the
+      // repeated, mid-thread one — Nova must greet back briefly (resumeKickoff probe), never
+      // rerun her full first-visit self-introduction as if the visitor were new.
+      id: 'resume-kickoff',
+      category: 'lifecycle',
+      persona: 'Returning visitor — a page reload re-sends the kickoff trigger on a resumed thread with history',
+      turns: [
+        { prompt: 'What are the two main entry points of this SDK?', relevanceAny: ['management', 'experience'] },
+        { prompt: KICKOFF_TRIGGER, isResumeKickoff: true, skipCompleteness: true, forbidTools: ['navigate_to_page', 'highlight_element'] },
+      ],
+    },
+    {
       // Live per-page context over the wire: pageContext below is pushed through the real
       // `session.setDynamicPrompt()` sugar (the exact call the site's highlighter.js makes),
       // landing as the `page_context` request variable on the turn. SOFT assertions only, on
