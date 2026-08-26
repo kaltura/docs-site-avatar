@@ -17,11 +17,11 @@ Live runs need `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET` in `.env` plus a docs
 
 ## What a green run proves
 
-Nothing is mocked. The harness drives the same provisioned brain the public site embeds, headlessly over `Conversations.stream()`, and self-ACKs tool calls exactly as a real browser session would (`tests/eval/transport.mjs`). A passing run is evidence about the deployed agent, not about the prompt text.
+Nothing is mocked. The harness drives the same provisioned brain the public site embeds, headlessly, over both transports the site itself uses: `Conversations.stream()` with self-ACKed tool calls exactly as a real browser session would (`tests/eval/transport.mjs`), and the SDK's real `KalturaChatSession` — the class the site's chat mode ships — for the chat/transport-switch/page-context personas (`tests/eval/chat-transport.mjs`). A passing run is evidence about the deployed agent, not about the prompt text.
 
 ## Coverage
 
-16 adversarial personas across 7 categories. Every turn is scored on every applicable dimension:
+19 adversarial personas across 9 categories. Every turn is scored on every applicable dimension:
 
 | Category | Personas | What it stresses |
 |---|---|---|
@@ -29,9 +29,11 @@ Nothing is mocked. The harness drives the same provisioned brain the public site
 | Navigation | `site-navigator-1/2`, `nonexistent-pages`, `single-nav-discipline` | Every real page reachable, no invented routes, one nav call per turn |
 | Knowledge | `facts-and-scope`, `knowledge-depth`, `release-delta-depth`, `personalization-and-threads-depth` | Answers grounded in the site's own pages, knowledge-base retrieval depth |
 | Highlight | `highlight-invariant`, `highlight-success` | Never claims an on-page highlight that didn't happen, and narrates the ones that did |
-| Continuity | `thread-continuity`, `role-adherence-drift` | Multi-turn memory, staying in persona under pressure |
+| Continuity | `thread-continuity`, `role-adherence-drift`, `transport-switch-continuity` | Multi-turn memory, staying in persona under pressure, and the same thread surviving a mid-conversation chat↔stream transport switch |
 | Positioning | `byo-brain-evaluator` | The "we have our own AI brain, just give us the talking head" conversation lands on the three-flows value story |
 | Lifecycle | `kickoff` | The synthetic session-open trigger gets a warm self-introduction, never an echo |
+| Transport | `chat-mode-tools` | Nav, knowledge, and highlight behavior hold when the turn runs through the real `KalturaChatSession` (the site's chat mode) instead of the raw stream |
+| Context | `page-context` | `setDynamicPrompt()` page context reaches the brain: it can list the current page's sections and highlight one. Soft assertions only — the `allow_client_variables` gate can lag ~24h after a redeploy (see [GUIDELINES.md](../tests/eval/GUIDELINES.md#when-the-eval-finds-something)) |
 
 Each turn is scored on 16 dimensions. **7 block release** (any failure on any turn fails the run):
 
@@ -46,7 +48,7 @@ Coverage can't silently rot: the coverage matrix in `report.json`/`report.md` is
 - **Live, no mocks.** Real brain, real tool-call ACKs, real knowledge retrieval. Slower than fixtures, but the thing being certified is the deployed agent.
 - **pass^k, not pass@k.** `--trials N` re-runs every persona end-to-end N independent times; release-blocking dimensions must pass *all* trials. A turn that passed some trials but not all is marked `🎲 flaky` in the report, which is exactly the signal that separates a regression from run-to-run nondeterminism.
 - **Warm-up gate.** Each run opens with a canary question only the knowledge base can answer, retried up to 20 times a minute apart, because "indexed" does not mean "retrieval is warm". Skip with `--no-warmup` when iterating against an already-warm agent.
-- **Tool-spiral circuit breaker.** The transport hard-stops a turn after 6 raw tool segments and records `spiralDetected`/`spiralRecovered`, so a stuck tool loop becomes a scored finding instead of a hung run.
+- **Tool-spiral circuit breaker.** The stream transport hard-stops a turn after 6 raw tool segments and records `spiralDetected`/`spiralRecovered`, so a stuck tool loop becomes a scored finding instead of a hung run. The chat transport flags the same condition post-hoc (its `sendText()` drains the whole stream); the engine's 90s per-turn abort bounds a live spiral there.
 - **Deterministic probes, external judge.** Every probe is a pure function (that's why `npm run test:eval:unit` works offline). Qualitative grading is deliberately not done in-process: `transcript.json` is written for an external LLM judge, whose verdicts fold back in via `--judge verdicts.json`. Rubric guidance: [GUIDELINES.md](../tests/eval/GUIDELINES.md#optional-qualitative-layer--the-external-llm-judge).
 
 ## The tools

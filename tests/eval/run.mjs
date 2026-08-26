@@ -4,8 +4,10 @@
  * hold." The direct structural peer of earnings-avatar-q2's tests/eval/run.mjs.
  *
  * Drives the REAL provisioned brain (configId from server/agent.json) headlessly via the SDK's
- * `Conversations.stream()`, self-ACKing `navigate_to_page` tool calls exactly like a real
- * browser session's `respondToTool()` would (see transport.mjs). Route/highlight-target ground
+ * `Conversations.stream()` — plus, for the chat-mode/transport-switch/page-context personas,
+ * via the SDK's real `KalturaChatSession` (see chat-transport.mjs) — self-ACKing
+ * `navigate_to_page` tool calls exactly like a real browser session's `respondToTool()`
+ * would (see transport.mjs). Route/highlight-target ground
  * truth loads live from the site checkout (see site-data.mjs) so the suite can never drift out
  * of sync with the real nav. A run with any release-blocking probe failure (invented URL/path,
  * a restricted-topic answer that isn't a refusal, a leaked prompt, or a knowledge-base search
@@ -62,7 +64,7 @@ const trialsArg = process.argv.includes('--trials') ? Number(process.argv[proces
 const trials = Number.isInteger(trialsArg) && trialsArg > 0 ? trialsArg : 1;
 const judgeArg = process.argv.includes('--judge') ? process.argv[process.argv.indexOf('--judge') + 1] : null;
 
-log(`▶ loaded ${siteData.routes.length} routes, ${siteData.highlightTargets.length} tagged highlight targets, ${siteData.headingTargets.length} heading targets (browser-only — this headless run can't exercise them) from ${siteData.siteDir}`);
+log(`▶ loaded ${siteData.routes.length} routes, ${siteData.highlightTargets.length} tagged highlight targets, ${siteData.headingTargets.length} heading targets (the page-context persona pushes one page's headings as live page_context) from ${siteData.siteDir}`);
 if (siteData.untaggedRoutes.length) log(`  (untagged pages, expected — not every page needs a highlight target: ${siteData.untaggedRoutes.map((r) => r.url).join(', ')})`);
 if (trials > 1) log(`▶ running ${trials} trials per persona for pass^k reliability gating`);
 
