@@ -44,6 +44,13 @@ export function buildPersonas(siteData) {
   // checkout that predates the page.
   const threeFlowsTarget = siteData.highlightTargets.find((t) => t.id === 'three-flows-table')
     || { id: 'three-flows-table', label: 'The three flows in every live conversation' };
+  // Chat-mode nav target: a stable real route, falling back gracefully on a tiny checkout.
+  const chatNavRoute = routes.find((r) => r.url === '/getting-started/') || routes[1] || routes[0];
+  // Page-context persona ground truth: the first real route that has heading targets, plus its
+  // headings — the same `{id,label}` list the site's highlighter.js pushes as page_context.
+  const pcRoute = routes.find((r) => siteData.headingTargets.some((h) => h.url === r.url)) || routes[0];
+  const pcHeads = siteData.headingTargets.filter((h) => h.url === pcRoute.url).slice(0, 12);
+  if (!pcHeads.length) pcHeads.push({ id: 'overview', label: 'Overview' });
 
   const personas = [
     {
@@ -99,8 +106,8 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Which exact version tag does the quick-start on the home page pin the jsDelivr import to?',
           capabilities: { use_knowledge_base: 'on' },
-          // Voice-styled answers verbalize version numbers ("one point four point one").
-          relevanceAny: ['1.4.1', 'one point four point one'],
+          // Voice-styled answers verbalize version numbers ("one point six point zero").
+          relevanceAny: ['1.6.0', 'one point six'],
         },
         {
           prompt: 'What methods does the intellect secrets API expose, and is deleting a secret reversible?',
@@ -346,6 +353,82 @@ export function buildPersonas(siteData) {
           prompt: 'Thanks — can you highlight it again, I want to make sure I see it?',
           simulateHighlightSuccess: realTarget.id,
           simulateHighlightLabel: realTarget.label,
+        },
+      ],
+    },
+    {
+      // Chat mode (the site's text-only path) runs the SDK's real KalturaChatSession instead of
+      // the raw converse stream — see chat-transport.mjs. Same brain, same tools, different
+      // client stack: this persona proves nav ACKs, KB answers, and simulated highlight ACKs all
+      // work through sendText()/onToolCall()/respondToTool() exactly as they do over the stream.
+      id: 'chat-mode-tools',
+      category: 'transport',
+      transport: 'chat',
+      persona: 'Visitor using the site in chat-only mode: navigation, a KB question, and a highlight',
+      turns: [
+        {
+          prompt: `Can you take me to the "${chatNavRoute.title}" page?`,
+          expectTools: ['navigate_to_page'],
+          expectNavPath: chatNavRoute.url,
+          forbidTools: ['highlight_element'],
+          skipCompleteness: true,
+        },
+        { prompt: 'What are the two main entry points of this SDK?', relevanceAny: ['management', 'experience'] },
+        {
+          prompt: `Can you point out ${realTarget.label} for me?`,
+          simulateHighlightSuccess: realTarget.id,
+          simulateHighlightLabel: realTarget.label,
+        },
+      ],
+    },
+    {
+      // The seamless-switch guarantee: one backend thread survives a mid-conversation move
+      // between the two client stacks (chat's KalturaChatSession ↔ the converse stream that
+      // backs avatar mode) with full memory in both directions. Each turn's transport override
+      // hands the SAME threadId to the other stack — exactly what the site's mode switch does.
+      id: 'transport-switch-continuity',
+      category: 'continuity',
+      transport: 'chat',
+      persona: 'Visitor who starts in chat mode, switches to avatar mode mid-conversation, then switches back',
+      turns: [
+        { prompt: "Hi, my name is Dana and I'm evaluating this SDK for an internal docs portal.", skipCompleteness: true },
+        { prompt: 'Quick check before we continue — what did I tell you my name was?', transport: 'stream', mustHonor: ['thread-continuity'], relevanceAny: ['dana'] },
+        { prompt: 'And what did I say I was evaluating the SDK for?', mustHonor: ['thread-continuity'], relevanceAny: ['docs portal', 'documentation portal', 'internal docs'] },
+      ],
+    },
+    {
+      // Live per-page context over the wire: pageContext below is pushed through the real
+      // `session.setDynamicPrompt()` sugar (the exact call the site's highlighter.js makes),
+      // landing as the `page_context` request variable on the turn. SOFT assertions only, on
+      // purpose: request_vars require the intellect's allow_client_variables gate, and partner
+      // config is Redis-cached ~24h server-side — after a `--reuse` redeploy that flips the
+      // gate on, turns can come back silently EMPTY (zero segments, no error, only a
+      // `empty_turn_with_request_vars` warning in this turn's `warnings`) until the cache
+      // expires. A hard/release-blocking assertion here would block CI on that propagation
+      // delay rather than on a real regression. Triage an empty turn here via that warning.
+      id: 'page-context',
+      category: 'context',
+      transport: 'chat',
+      persona: 'Visitor in chat mode whose browser pushes the current page and its sections as live context',
+      turns: [
+        {
+          prompt: 'Which sections does the page I am currently on have? Just list them briefly.',
+          pageContext: {
+            page: { title: pcRoute.title, url: pcRoute.url },
+            highlightable_elements: pcHeads.map(({ id, label }) => ({ id, label })),
+          },
+          relevanceAny: pcHeads.map((h) => h.label.toLowerCase()),
+          skipCompleteness: true,
+        },
+        {
+          prompt: `Point me at the "${pcHeads[0].label}" section.`,
+          pageContext: {
+            page: { title: pcRoute.title, url: pcRoute.url },
+            highlightable_elements: pcHeads.map(({ id, label }) => ({ id, label })),
+          },
+          simulateHighlightSuccess: pcHeads[0].id,
+          simulateHighlightLabel: pcHeads[0].label,
+          skipCompleteness: true,
         },
       ],
     },

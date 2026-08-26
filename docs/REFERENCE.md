@@ -21,6 +21,7 @@
 | `docs/REFERENCE.md` | This file |
 | `tests/eval/GUIDELINES.md` | Dimensions, blocking rationale, pass@k vs pass^k, coverage contract, triage guide |
 | `tests/eval/transport.mjs` | Wire layer — tool-call self-ACKing, spiral circuit breaker |
+| `tests/eval/chat-transport.mjs` | Wire layer, chat mode — same contract, driven through the SDK's real `KalturaChatSession` |
 | `tests/eval/engine.mjs` | Run layer — `runTurn`/`runEval`/trial merging |
 | `tests/eval/probes.mjs` | Scoring layer — pure per-dimension check functions, `DIMENSIONS`, `RELEASE_BLOCKING` |
 | `tests/eval/probes.test.mjs` | Unit tests for `probes.mjs` |
@@ -98,14 +99,14 @@ Everything a fresh clone needs is in `.env.example`; this table is what each one
 | `AGENTIC_PARTNER_ID` | Yes | Partner ID for every `Management` call (`provision.mjs`, `run.mjs`, the dashboard) |
 | `AGENTIC_ADMIN_SECRET` | Yes | Admin secret paired with the partner ID above. Never commit a real value |
 | `SITE_REPO_DIR` | No | Overrides the default docs-site checkout path `site-root.mjs` resolves to. Flag (`--site-dir`) takes precedence over this; this takes precedence over the default sibling checkout (`../intelligent-agents-sdk-site`) |
-| `AGENTIC_GENIE_URL` | No | Overrides the Genie conversation backend `transport.mjs` posts tool-call ACKs to. Defaults to production |
+| `AGENTIC_GENIE_URL` | No | Overrides the Genie conversation backend both eval transports talk to (`transport.mjs` ACK posts, `chat-transport.mjs`'s `KalturaChatSession`). Defaults to production |
 | `NOVA_DASHBOARD_PORT` | No | Port for `npm run eval:dashboard`. Defaults to `8093`. The dashboard also accepts a positional CLI arg (`node tests/eval/dashboard/server.mjs 9000`), checked before this env var |
 
 ## Artifact file shapes
 
 All written to `tests/eval/artifacts/`, gitignored, always reflecting the most recent full run (a filtered dashboard run with `?ids=` does not overwrite them — see the dashboard routes below).
 
-- **`report.json`** — the full scored report: `_meta` (`generatedAt`, `configId`, `routes`, `siteDir`, `trials`, `judge`), `summary` (`healthy`, `overall`, `totalTurns`, `turnsFailing`, `releaseBlockingFailCount`, `erroredTurnCount`, `routesExercised`/`routesTotal`, `dimensions`, `latency`, and `reliability` when `trials > 1`), `coverage` (`expectedTools`, `observedTools`, `uncoveredRoutes`), `releaseBlockingFails`, `erroredTurns`, `personas` (per-turn detail including `results`, `reliability`, `spiralDetected`/`spiralRecovered`), and `judge` when a judge pass has been folded in.
+- **`report.json`** — the full scored report: `_meta` (`generatedAt`, `configId`, `routes`, `siteDir`, `trials`, `judge`), `summary` (`healthy`, `overall`, `totalTurns`, `turnsFailing`, `releaseBlockingFailCount`, `erroredTurnCount`, `routesExercised`/`routesTotal`, `dimensions`, `latency`, and `reliability` when `trials > 1`), `coverage` (`expectedTools`, `observedTools`, `uncoveredRoutes`), `releaseBlockingFails`, `erroredTurns`, `personas` (per-turn detail including `results`, `reliability`, `spiralDetected`/`spiralRecovered`, `transport`, and `warnings` when the SDK emitted any — e.g. `empty_turn_with_request_vars`), and `judge` when a judge pass has been folded in.
 - **`transcript.json`** — the ungraded raw shape a judge grades: `_meta` plus `personas[].turns[]` with only `prompt`, `latencyMs`, `text`, `toolNames`.
 - **`report.md`** — `renderMarkdown(report)`'s human-readable rendering of the same `report.json`: healthy/blocked banner, dimension score table, coverage, release-blocking and errored-turn call-outs, per-persona per-turn detail, and the judge section when present.
 - **`history/<generatedAt-with-colons-and-dots-as-dashes>.json`** — a full timestamped copy of that run's `report.json`, one per run, read by the dashboard's trend view via `listHistory()`.

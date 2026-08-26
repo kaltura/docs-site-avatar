@@ -26,12 +26,13 @@ const SPOKEN_TYPES = new Set(['text', 'avatar', 'avatar-filler']);
 // with no sign of stopping on its own. A smaller limit than the SDK's default (30) is used here
 // deliberately — this is a batch-eval budget, not a live conversation, so the goal is "clearly
 // spiraling, not just a legitimate multi-tool turn," not exact parity with interactive timing.
-const TOOL_SPIRAL_HARD_LIMIT = 6;
+export const TOOL_SPIRAL_HARD_LIMIT = 6;
 
 /** Resolve a requested path against the real route list — the same contract the site's
  * own `navigator.js` ack implements (`{ok:true,path}` / `{ok:false,error:'not_found'}`),
- * so a synthetic eval ACK is indistinguishable from a real browser session's. */
-function resolveRoute(path, routes) {
+ * so a synthetic eval ACK is indistinguishable from a real browser session's.
+ * Exported so chat-transport.mjs ACKs with the identical semantics. */
+export function resolveRoute(path, routes) {
   if (typeof path !== 'string' || !path) return null;
   const norm = (p) => p.replace(/\/$/, '');
   return routes.find((r) => r.url === path) || routes.find((r) => norm(r.url) === norm(path)) || null;

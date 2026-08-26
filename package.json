@@ -13,7 +13,7 @@
     "fetch-sdk": "node scripts/fetch-sdk.mjs --force",
     "provision": "node server/provision.mjs",
     "cleanup": "node server/provision.mjs --cleanup",
-    "test:eval:unit": "node --test tests/eval/probes.test.mjs tests/eval/provision.test.mjs",
+    "test:eval:unit": "node --test tests/eval/probes.test.mjs tests/eval/provision.test.mjs tests/eval/chat-transport.test.mjs",
     "eval": "node tests/eval/run.mjs",
     "eval:dashboard": "node tests/eval/dashboard/server.mjs"
   }

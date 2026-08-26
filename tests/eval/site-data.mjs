@@ -6,13 +6,14 @@
  * hand-copied into this repo. This keeps the eval from drifting the moment a page is added,
  * renamed, or re-tagged on the site.
  *
- * NOTE ON WHAT THIS CAN AND CAN'T VERIFY: `highlightable_elements` (curated tags AND headings)
- * only ever reaches the live brain via `session.setDynamicPrompt()` — a browser-socket-only call
- * (see sdk/src/experience/session.js) with NO HTTP equivalent (`Conversations.stream()`'s
- * `request_vars` is a documented DISTINCT mechanism). The headless eval in this directory talks
- * to `Conversations.stream()` only, so it can never actually push a page's heading list into a
- * turn — `headingTargets` below is exposed for logging/inventory and for a real-browser eval to
- * consume, NOT as something a personas.mjs turn can assert the brain picked correctly from.
+ * NOTE ON HOW `highlightable_elements` REACHES THE BRAIN: since SDK v1.5 it travels as the
+ * `page_context` request variable — `session.setDynamicPrompt()` (either transport) is sugar
+ * that JSON-stringifies its payload into `request_vars.page_context`, the exact per-turn
+ * channel `Conversations.stream()` exposes directly as `requestVars`. So a headless turn CAN
+ * push a page's heading list into a turn (see the page-context probe in personas.mjs), as long
+ * as the agent's intellect has `allow_client_variables: true` — with it off the backend
+ * silently returns an empty turn, no error (see provision.mjs's pinned capability comment).
+ * `headingTargets` below is the inventory such payloads are built from.
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
