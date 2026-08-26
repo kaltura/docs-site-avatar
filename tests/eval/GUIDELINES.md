@@ -15,7 +15,7 @@ This eval harness answers one question: "if a real visitor to the SDK docs site 
 | `noFalseHighlightClaim` | Never claims she highlighted/pointed at/circled something on a turn where that didn't actually happen | **Yes** |
 | `highlightSuccessNarration` | The flip side of the above: when `highlight_element` DID come back with a real success ack, she says so rather than staying silent or claiming failure | No — UX quality, not a trust violation |
 | `latency` | Turn round-trip time | No |
-| `toolBudget` | No turn fires more than a small fixed number of tool calls | No |
+| `toolBudget` | No turn fires more than a small fixed number of tool calls. All KB search calls in a turn (`search_knowledge_base` + `async_search_knowledge_base`) count as one slot — the platform injects both tools whenever `use_knowledge_base` is on, and the brain habitually fires the pair for a single lookup; the budget measures real tool spirals, not that habit | No |
 | `singleToolCallPerTurn` | `navigate_to_page` fires at most once per turn; any other tool retried in the same turn uses genuinely different arguments, not a stuck-loop repeat | No |
 | `completeness` | Reply isn't a bare one-liner deflection | No |
 | `relevance` | Reply contains at least one of the expected keywords | No |
