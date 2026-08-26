@@ -60,6 +60,28 @@ test('toolBudget: exceeding the cap fails', () => {
   const r = probeToolBudget('here', Array.from({ length: 4 }, () => ({ name: 'highlight_element' })));
   assert.equal(r.pass, false);
 });
+test('toolBudget: the platform-injected KB search pair counts as one slot', () => {
+  // sync+async search + get_experience_instructions + navigate = 4 raw calls, 3 budgeted.
+  const r = probeToolBudget('here', [
+    { name: 'search_knowledge_base' },
+    { name: 'async_search_knowledge_base' },
+    { name: 'get_experience_instructions' },
+    { name: 'navigate_to_page' },
+  ]);
+  assert.equal(r.pass, true);
+  assert.equal(r.count, 3);
+});
+test('toolBudget: a real spiral still fails after KB-search dedupe', () => {
+  const r = probeToolBudget('here', [
+    { name: 'search_knowledge_base' },
+    { name: 'async_search_knowledge_base' },
+    { name: 'navigate_to_page' },
+    { name: 'highlight_element' },
+    { name: 'get_experience_instructions' },
+  ]);
+  assert.equal(r.pass, false);
+  assert.equal(r.count, 4);
+});
 
 /* completeness */
 test('completeness: skipped when expectation says so', () => {

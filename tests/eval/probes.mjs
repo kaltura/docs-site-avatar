@@ -129,8 +129,19 @@ export function probeTools(expectation, toolCalls) {
 
 const TOOL_BUDGET_MAX = 3;
 
+// Both KB search tools are injected by the platform itself whenever
+// use_knowledge_base is 'on' — the brain habitually fires the sync/async pair
+// for one lookup, and no prompt rule has made that stick (see provision.mjs's
+// "search at most once per turn" rule). The budget exists to catch tool
+// spirals, not the platform's search habit, so all KB search calls in a turn
+// count as one budget slot. probeSingleToolCallPerTurn still flags a same-args
+// repeat of any tool, searches included.
+const KB_SEARCH_TOOLS = new Set(['search_knowledge_base', 'async_search_knowledge_base']);
+
 export function probeToolBudget(text, toolCalls) {
-  const count = (toolCalls || []).length;
+  const calls = toolCalls || [];
+  const kbSearches = calls.filter((c) => KB_SEARCH_TOOLS.has(c.name)).length;
+  const count = calls.length - kbSearches + (kbSearches > 0 ? 1 : 0);
   return { pass: count <= TOOL_BUDGET_MAX, count, max: TOOL_BUDGET_MAX };
 }
 
