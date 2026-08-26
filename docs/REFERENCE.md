@@ -41,7 +41,7 @@
 | `fetch-sdk` | `node scripts/fetch-sdk.mjs --force` | write, idempotent (overwrites `vendor/sdk/` with the same tag's content) |
 | `provision` | `node server/provision.mjs` | write, NOT idempotent (creates a new intellect/avatar/agent/knowledge base every run — see `--reuse`/`--agent-id`/`--avatar-id` below to update in place instead) |
 | `cleanup` | `node server/provision.mjs --cleanup` | write, destructive |
-| `test:eval:unit` | `node --test tests/eval/probes.test.mjs tests/eval/provision.test.mjs` | read |
+| `test:eval:unit` | `node --test tests/eval/probes.test.mjs tests/eval/provision.test.mjs tests/eval/chat-transport.test.mjs` | read |
 | `eval` | `node tests/eval/run.mjs` | read (drives the live agent conversationally; writes only to `tests/eval/artifacts/`) |
 | `eval:dashboard` | `node tests/eval/dashboard/server.mjs` | read (starts a local server; each run it launches carries the same capability as `eval`) |
 
