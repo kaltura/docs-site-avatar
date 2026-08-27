@@ -39,6 +39,7 @@ For the full walkthrough with expected output at each step, see [docs/GETTING-ST
 | [tests/eval/GUIDELINES.md](tests/eval/GUIDELINES.md) | Look up exactly what the eval measures, why each dimension is (or isn't) release-blocking, and how to triage a failure |
 | [SECURITY.md](SECURITY.md) | Report a vulnerability, or see what's in/out of scope and how credentials/redeploy access are gated |
 | [AGENTS.md](AGENTS.md) | Get a coding agent oriented in this repo fast — safety invariants, commands, doc map |
+| [Case Study: Nova](https://kaltura.github.io/intelligent-agents-sdk/explanation/case-study-nova/) | How the KB-indexing and eval patterns here fit into the wider SDK's docs |
 
 ## Credentials
 
