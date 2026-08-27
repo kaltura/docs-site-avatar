@@ -5,6 +5,7 @@ import {
   probeSingleToolCallPerTurn, probeNoKbSearchWhenOff, probeRestrictedTopicRefusal,
   probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probeNoInventedUrl, probeNoInventedPath,
   probeNavPathMatch, probeNoInventedApi, probeNoFalseHighlightClaim, probeHighlightSuccessNarration,
+  probeAutoHighlightFired, probeHighlightTargetMatch, probeNoNavFailureConfession,
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
 import { unionScored } from './engine.mjs';
@@ -519,6 +520,65 @@ test('scoreTurn: a genuine highlight success with correct narration is healthy a
   assert.equal(scored.results.highlightSuccessNarration.pass, true);
   assert.equal(scored.results.noFalseHighlightClaim, null);
   assert.equal(scored.healthy, true);
+});
+
+/* auto-highlight-after-nav (Path B) firing order */
+test('autoHighlightFired: not applicable when unset', () => {
+  assert.equal(probeAutoHighlightFired({}, [{ name: 'navigate_to_page' }, { name: 'highlight_element' }]), null);
+});
+test('autoHighlightFired: nav then highlight in the same turn passes', () => {
+  const r = probeAutoHighlightFired({ expectAutoHighlightAfterNav: true },
+    [{ name: 'navigate_to_page' }, { name: 'highlight_element' }]);
+  assert.equal(r.pass, true);
+});
+test('autoHighlightFired: highlight only, no nav call, fails', () => {
+  const r = probeAutoHighlightFired({ expectAutoHighlightAfterNav: true }, [{ name: 'highlight_element' }]);
+  assert.equal(r.pass, false);
+});
+test('autoHighlightFired: highlight before nav (wrong order) fails', () => {
+  const r = probeAutoHighlightFired({ expectAutoHighlightAfterNav: true },
+    [{ name: 'highlight_element' }, { name: 'navigate_to_page' }]);
+  assert.equal(r.pass, false);
+});
+
+/* highlight target match — mirrors navPathMatch for highlight_element's `target` arg */
+test('highlightTargetMatch: not applicable when unset', () => {
+  assert.equal(probeHighlightTargetMatch({}, [{ name: 'highlight_element', args: { target: 'salesforce' } }]), null);
+});
+test('highlightTargetMatch: matching target id passes', () => {
+  const r = probeHighlightTargetMatch({ expectHighlightTarget: 'salesforce' },
+    [{ name: 'highlight_element', args: { target: 'salesforce' } }]);
+  assert.equal(r.pass, true);
+});
+test('highlightTargetMatch: wrong target id fails even though the tool fired', () => {
+  const r = probeHighlightTargetMatch({ expectHighlightTarget: 'salesforce' },
+    [{ name: 'highlight_element', args: { target: 'hubspot' } }]);
+  assert.equal(r.pass, false);
+});
+test('highlightTargetMatch: no highlight_element call at all fails', () => {
+  const r = probeHighlightTargetMatch({ expectHighlightTarget: 'salesforce' }, []);
+  assert.equal(r.pass, false);
+});
+
+/* no nav-failure confession — provision.mjs now says a navigate_to_page not-found is her own
+ * mistake to answer around silently, never something to narrate */
+test('noNavFailureConfession: not applicable when the turn did not simulate a nav not-found', () => {
+  assert.equal(probeNoNavFailureConfession({}, "I couldn't find that page."), null);
+});
+test('noNavFailureConfession: answering in words with no mention of a failed attempt passes', () => {
+  const r = probeNoNavFailureConfession({ simulateNavNotFound: true },
+    'Getting Started walks through installing the SDK and running your first agent.');
+  assert.equal(r.pass, true);
+});
+test('noNavFailureConfession: "I tried to take you there but couldn\'t find it" fails', () => {
+  const r = probeNoNavFailureConfession({ simulateNavNotFound: true },
+    "I tried to take you to that page, but I couldn't find it.");
+  assert.equal(r.pass, false);
+  assert.equal(r.confessed, true);
+});
+test('noNavFailureConfession: "that page wasn\'t found" fails', () => {
+  const r = probeNoNavFailureConfession({ simulateNavNotFound: true }, "That page wasn't found, sorry about that.");
+  assert.equal(r.pass, false);
 });
 
 /* unionScored — pass^k aggregation across repeated trials of the same logical turn */

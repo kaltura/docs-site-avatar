@@ -274,6 +274,54 @@ export function probeNavPathMatch(expectation, toolCalls, siteData) {
   return { pass: matched, expected: expectation.expectNavPath, got: navCalls.map((c) => c.args?.path) };
 }
 
+/**
+ * Path B (provision.mjs's obeyRules "case 2"): a same-turn navigate_to_page → highlight_element
+ * pair, fired because the visitor's own words named a specific real thing that happened to be on
+ * the destination page. Soft, not release-blocking — under-firing is a UX miss (the visitor still
+ * gets a correct, complete answer via navigate_to_page alone), never a trust violation the way an
+ * over-firing false highlight claim would be. Applicable only when the persona turn explicitly
+ * expects this combination (`expectAutoHighlightAfterNav`); order matters, since a highlight_element
+ * call from a stale target on an earlier turn's page must not count.
+ */
+export function probeAutoHighlightFired(expectation, toolCalls) {
+  if (!expectation.expectAutoHighlightAfterNav) return null;
+  const calls = toolCalls || [];
+  const navIdx = calls.findIndex((c) => c.name === 'navigate_to_page');
+  const highlightIdx = calls.findIndex((c) => c.name === 'highlight_element');
+  const pass = navIdx !== -1 && highlightIdx !== -1 && navIdx < highlightIdx;
+  return { pass, navIdx, highlightIdx };
+}
+
+/** Mirrors probeNavPathMatch for highlight_element's `target` argument — catches Path B firing
+ * with the wrong id, including the case where `simulateHighlightSuccess`'s forced ack makes that
+ * wrong call look successful (the forced ack only checks that highlight_element fired at all, not
+ * which id it named — see transport.mjs's ackHighlight comment). */
+export function probeHighlightTargetMatch(expectation, toolCalls) {
+  if (!expectation.expectHighlightTarget) return null;
+  const highlightCalls = (toolCalls || []).filter((c) => c.name === 'highlight_element');
+  const matched = highlightCalls.some((c) => c.args?.target === expectation.expectHighlightTarget);
+  return { pass: matched, expected: expectation.expectHighlightTarget, got: highlightCalls.map((c) => c.args?.target) };
+}
+
+// Catches Nova confessing a failed navigation attempt — provision.mjs's obeyRules now says a
+// navigate_to_page not-found is her own mistake to answer around silently, never something to
+// narrate ("I tried to take you there but couldn't find it" makes the agent look broken, since
+// resolveRoute's exact-match-only contract means not-found can only happen from a self-inflicted
+// hallucinated path in the first place — a legitimate branch never produces it).
+const NAV_FAILURE_CONFESSION_RE = /\bi\s+(tried|attempted)\s+to\s+(take|navigate|bring|go)|\b(couldn't|could not|wasn't able to|was not able to)\s+find\s+(that|this|the)\s+page|\bthat\s+page\s+(wasn't|was not)\s+found|\bfailed\s+to\s+(navigate|find|take you)|\bunable\s+to\s+(navigate|find|take you)/i;
+
+/**
+ * Applicable only on a turn that opted into `simulateNavNotFound` (see personas.mjs/engine.mjs) —
+ * the only way a headless run deterministically hits a genuine navigate_to_page not-found without
+ * that also being a `noInventedPath` failure in its own right. Soft: the underlying answer can
+ * still be correct even if the phrasing slips, so this doesn't gate release on its own.
+ */
+export function probeNoNavFailureConfession(expectation, text) {
+  if (!expectation.simulateNavNotFound) return null;
+  const confessed = NAV_FAILURE_CONFESSION_RE.test(text || '');
+  return { pass: !confessed, confessed };
+}
+
 // A short adverb ("just", "now", "already", "successfully") commonly lands between the subject
 // and the verb in real live replies (e.g. "I've just highlighted the code example") — tolerate
 // up to one so the claim is still caught. A second common live shape is a compound predicate
@@ -353,6 +401,9 @@ export const DIMENSIONS = [
   'noInventedApi',
   'noFalseHighlightClaim',
   'highlightSuccessNarration',
+  'autoHighlightFired',
+  'highlightTargetMatch',
+  'noNavFailureConfession',
 ];
 
 export const RELEASE_BLOCKING = [
@@ -390,6 +441,9 @@ export function scoreTurn(turn, siteData) {
     noInventedApi: probeNoInventedApi(expectation, text),
     noFalseHighlightClaim: probeNoFalseHighlightClaim(toolCalls, text, acks),
     highlightSuccessNarration: probeHighlightSuccessNarration(toolCalls, text, acks),
+    autoHighlightFired: probeAutoHighlightFired(expectation, toolCalls),
+    highlightTargetMatch: probeHighlightTargetMatch(expectation, toolCalls),
+    noNavFailureConfession: probeNoNavFailureConfession(expectation, text),
   };
 
   const active = Object.entries(results).filter(([, v]) => v !== null);

@@ -65,14 +65,14 @@ test('collects text, ACKs a waitForResponse nav tool via respondToTool, returns 
   assert.equal(r.spiralDetected, false);
   assert.equal(r.spiralRecovered, false);
   assert.deepEqual(r.warnings, []);
-  assert.deepEqual(r.acks, [{ name: 'navigate_to_page', response: { ok: true, path: '/getting-started/' } }]);
+  assert.deepEqual(r.acks, [{ name: 'navigate_to_page', response: { ok: true, path: '/getting-started/', highlightable: [] } }]);
 
   const ackCall = calls.find((c) => c.url.endsWith('/assistant/tool_response'));
   assert.ok(ackCall, 'tool_response POST happened');
   assert.equal(ackCall.body.tool_name, 'navigate_to_page');
   assert.equal(ackCall.body.tool_id, 'tc_1');
   assert.equal(ackCall.body.tool_invocation_id, 'tc_1');
-  assert.deepEqual(ackCall.body.response, { ok: true, path: '/getting-started/' });
+  assert.deepEqual(ackCall.body.response, { ok: true, path: '/getting-started/', highlightable: [] });
   assert.equal(ackCall.headers.Authorization, `KS ${FAKE_TOKEN}`);
 });
 
@@ -113,6 +113,36 @@ test('nav to an unknown path ACKs not_found; highlight uses the forced ack when 
   assert.equal(ackBodies.length, 2);
   assert.deepEqual(ackBodies[0].response, { ok: false, error: 'not_found' });
   assert.deepEqual(ackBodies[1].response, { ok: true, id: 'install', label: 'Install' });
+});
+
+test('a successful nav ack carries the destination page\'s real highlightable list (Path B\'s prerequisite)', async () => {
+  const siteData = {
+    highlightTargets: [{ url: '/getting-started/', id: 'install-cmd', label: 'Install command' }],
+    headingTargets: [
+      { url: '/getting-started/', id: 'install-cmd', label: 'duplicate, must dedupe to the tagged one' },
+      { url: '/getting-started/', id: 'next-steps', label: 'Next steps' },
+      { url: '/', id: 'quickstart', label: 'Quick-start' },
+    ],
+  };
+  const { impl } = fakeFetch([
+    { type: 'tool', content: 'navigate_to_page {"path":"/getting-started/"}', tool_metadata: { id: 'tc_1', wait_for_response: true } },
+  ]);
+  const r = await chatTurnWithAck({ management, configId: 1, message: 'take me there', threadId: null, routes: ROUTES, siteData, fetchImpl: impl });
+
+  assert.deepEqual(r.acks, [{
+    name: 'navigate_to_page',
+    response: { ok: true, path: '/getting-started/', highlightable: [{ id: 'install-cmd', label: 'Install command' }, { id: 'next-steps', label: 'Next steps' }] },
+  }]);
+});
+
+test('simulateNavNotFound forces a not-found ack even for a real path, without touching the call itself', async () => {
+  const { impl } = fakeFetch([
+    { type: 'tool', content: 'navigate_to_page {"path":"/getting-started/"}', tool_metadata: { id: 'tc_1', wait_for_response: true } },
+  ]);
+  const r = await chatTurnWithAck({ management, configId: 1, message: 'take me there', threadId: null, routes: ROUTES, simulateNavNotFound: true, fetchImpl: impl });
+
+  assert.deepEqual(r.toolCalls[0].args, { path: '/getting-started/' });
+  assert.deepEqual(r.acks, [{ name: 'navigate_to_page', response: { ok: false, error: 'not_found' } }]);
 });
 
 test('flags a spiral post-hoc from raw tool segment count, never claims recovery', async () => {

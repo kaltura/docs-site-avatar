@@ -38,7 +38,7 @@ function withTimeout(promise, ms, label, ctrl) {
 
 /**
  * Run one live conversation turn, self-ACKing tool calls exactly like a real browser would.
- * @param {{management: object, configId: number, message: string, threadId: string|null, routes: {url:string}[], highlightAck?: object, capabilities?: object, transport?: 'stream'|'chat', pageContext?: object}} opts
+ * @param {{management: object, configId: number, message: string, threadId: string|null, routes: {url:string}[], siteData?: object, highlightAck?: object, simulateNavNotFound?: boolean, capabilities?: object, transport?: 'stream'|'chat', pageContext?: object}} opts
  *   `capabilities` is the documented per-message override (conversations.stream()'s
  *   `{name:state}` param) — e.g. `{use_knowledge_base:'on'}` to probe RAG retrieval quality for
  *   one turn without touching the live agent's stored (usually off) capability state.
@@ -47,14 +47,19 @@ function withTimeout(promise, ms, label, ctrl) {
  *   transports mid-thread to prove backend thread continuity across the two client stacks.
  *   `pageContext` (chat transport only) is pushed via `session.setDynamicPrompt()` before the
  *   turn, the exact call the site's highlighter.js makes per page.
+ *   `siteData` lets a successful nav ack carry a real `highlightable` list, mirroring production
+ *   `navigator.js` — required for a same-turn navigate_to_page → highlight_element (Path B) call
+ *   to have anything real to resolve against. `simulateNavNotFound` forces navigate_to_page's ack
+ *   to `{ok:false,error:'not_found'}` even for a real path, to test the not-found branch in
+ *   isolation from a path-fabrication failure.
  */
-export async function runTurn({ management, configId, message, threadId, routes, highlightAck, capabilities, transport = 'stream', pageContext }) {
+export async function runTurn({ management, configId, message, threadId, routes, siteData, highlightAck, simulateNavNotFound, capabilities, transport = 'stream', pageContext }) {
   const t0 = Date.now();
   const ctrl = new AbortController();
   const turnFn = transport === 'chat' ? chatTurnWithAck : streamTurnWithAck;
   try {
     const r = await withTimeout(
-      turnFn({ management, configId, message, threadId, routes, highlightAck, capabilities, pageContext, signal: ctrl.signal }),
+      turnFn({ management, configId, message, threadId, routes, siteData, highlightAck, simulateNavNotFound, capabilities, pageContext, signal: ctrl.signal }),
       TURN_TIMEOUT_MS,
       message,
       ctrl,
@@ -135,7 +140,7 @@ export async function runEval({ management, configId, siteData, personas, trials
       const personaTransport = p.transport === 'chat' ? 'chat' : 'stream';
       const warmup = skipWarmup
         ? { threadId: null }
-        : await runTurn({ management, configId, message: KICKOFF_TRIGGER, threadId: null, routes: siteData.routes, transport: personaTransport });
+        : await runTurn({ management, configId, message: KICKOFF_TRIGGER, threadId: null, routes: siteData.routes, siteData, transport: personaTransport });
       let threadId = warmup.threadId || null;
       const turns = [];
       for (const t of p.turns) {
@@ -148,7 +153,7 @@ export async function runEval({ management, configId, siteData, personas, trials
         // A turn may override its persona's transport (t.transport) — this is how a single
         // persona proves the SAME thread survives a mid-conversation chat↔stream switch.
         const turnTransport = t.transport || p.transport || 'stream';
-        const r = await runTurn({ management, configId, message: t.prompt, threadId, routes: siteData.routes, highlightAck, capabilities: t.capabilities, transport: turnTransport, pageContext: t.pageContext });
+        const r = await runTurn({ management, configId, message: t.prompt, threadId, routes: siteData.routes, siteData, highlightAck, simulateNavNotFound: t.simulateNavNotFound, capabilities: t.capabilities, transport: turnTransport, pageContext: t.pageContext });
         threadId = r.threadId || threadId;
         const rec = {
           prompt: t.prompt, expectation: t, latencyMs: r.latencyMs, text: r.text, toolCalls: r.toolCalls, acks: r.acks, error: r.error,

@@ -20,18 +20,19 @@
  */
 import { KalturaChatSession } from '../../vendor/sdk/src/experience/chat-session.js';
 import { ksString } from '../../vendor/sdk/src/management/client.js';
-import { resolveRoute, TOOL_SPIRAL_HARD_LIMIT } from './transport.mjs';
+import { resolveRoute, highlightableForRoute, TOOL_SPIRAL_HARD_LIMIT } from './transport.mjs';
 
 /**
  * Run one headless chat-mode conversation turn through the real KalturaChatSession,
  * ACKing `navigate_to_page` and `highlight_element` via `respondToTool()`.
- * @param {object} opts — same contract as `streamTurnWithAck`, plus:
+ * @param {object} opts — same contract as `streamTurnWithAck` (including `siteData` and
+ *   `simulateNavNotFound`), plus:
  * @param {object} [opts.pageContext] delivered via `session.setDynamicPrompt()` before the
  *   turn — the same payload shape the site's highlighter.js pushes
  *   (`{page:{title,url}, highlightable_elements:[{id,label}]}`).
  * @returns {Promise<{text:string, threadId:string|null, toolCalls:object[], acks:object[], rawToolSegCount:number, spiralDetected:boolean, spiralRecovered:boolean, warnings:object[]}>}
  */
-export async function chatTurnWithAck({ management, configId, message, threadId, routes, highlightAck, capabilities, pageContext, fetchImpl = fetch, signal }) {
+export async function chatTurnWithAck({ management, configId, message, threadId, routes, siteData, highlightAck, simulateNavNotFound, capabilities, pageContext, fetchImpl = fetch, signal }) {
   const token = await management.sessions.createConversationToken({ configId });
   const session = new KalturaChatSession({
     token: ksString(token),
@@ -58,8 +59,8 @@ export async function chatTurnWithAck({ management, configId, message, threadId,
     }
   };
   session.onToolCall('navigate_to_page', (args, call) => {
-    const route = resolveRoute(args?.path, routes);
-    ackVia(call, route ? { ok: true, path: route.url } : { ok: false, error: 'not_found' });
+    const route = simulateNavNotFound ? null : resolveRoute(args?.path, routes);
+    ackVia(call, route ? { ok: true, path: route.url, highlightable: highlightableForRoute(route.url, siteData) } : { ok: false, error: 'not_found' });
   });
   session.onToolCall('highlight_element', (args, call) => {
     ackVia(call, highlightAck || { ok: false, error: 'not_found' });

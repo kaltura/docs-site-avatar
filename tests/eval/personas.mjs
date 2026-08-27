@@ -51,6 +51,21 @@ export function buildPersonas(siteData) {
   const pcRoute = routes.find((r) => siteData.headingTargets.some((h) => h.url === r.url)) || routes[0];
   const pcHeads = siteData.headingTargets.filter((h) => h.url === pcRoute.url).slice(0, 12);
   if (!pcHeads.length) pcHeads.push({ id: 'overview', label: 'Overview' });
+  // Auto-highlight-after-navigation ("Path B") ground truth: a real page with two real,
+  // visitor-nameable headings — the exact shape of the guiding example (asking about Salesforce
+  // navigates to the integrations guide, then highlights the Salesforce section in the SAME
+  // reply, without the visitor separately asking to be "shown" or to have something "pointed
+  // out"). Falls back gracefully on a checkout that predates this page/headings.
+  const apiIntegrationsRoute = routes.find((r) => r.url === '/guides/external-api-integrations/') || routes[0];
+  const salesforceTarget = siteData.headingTargets.find((h) => h.url === apiIntegrationsRoute.url && h.id === 'salesforce')
+    || { id: 'salesforce', label: 'Salesforce' };
+  const hubspotTarget = siteData.headingTargets.find((h) => h.url === apiIntegrationsRoute.url && h.id === 'hubspot')
+    || { id: 'hubspot', label: 'HubSpot' };
+  // The exact page/phrasing behind the d32c474 regression: a page whose retrieved KB content is
+  // saturated with anchor/highlight language ("client-side commands") drew an unsolicited
+  // highlight_element on a nav-only "show me" turn. No persona guarded this before — this is the
+  // first permanent regression test for that specific bug.
+  const clientCommandsRoute = routes.find((r) => r.url === '/guides/client-commands/') || routes[0];
 
   const personas = [
     {
@@ -354,6 +369,71 @@ export function buildPersonas(siteData) {
           simulateHighlightSuccess: realTarget.id,
           simulateHighlightLabel: realTarget.label,
         },
+      ],
+    },
+    {
+      // Path B, positive: the visitor's own words name a specific real thing (never a "show me"/
+      // "point out" meta-request) that turns out to be on the destination page's highlightable
+      // list — provision.mjs's obeyRules now says this should fire navigate_to_page AND
+      // highlight_element in the SAME reply, unprompted. Turn 2 stays on the same page (no fresh
+      // nav expected) to prove the target-matching half works even without a same-turn nav call.
+      id: 'auto-highlight-after-nav',
+      category: 'highlight',
+      persona: 'Visitor whose question names a specific real integration, never asking to be "shown" or "pointed at" anything',
+      turns: [
+        {
+          prompt: 'How do I send leads to Salesforce?',
+          expectTools: ['navigate_to_page', 'highlight_element'],
+          expectNavPath: apiIntegrationsRoute.url,
+          expectAutoHighlightAfterNav: true,
+          expectHighlightTarget: salesforceTarget.id,
+          simulateHighlightSuccess: salesforceTarget.id,
+          simulateHighlightLabel: salesforceTarget.label,
+        },
+        {
+          prompt: 'What about HubSpot — same idea?',
+          expectHighlightTarget: hubspotTarget.id,
+          simulateHighlightSuccess: hubspotTarget.id,
+          simulateHighlightLabel: hubspotTarget.label,
+        },
+      ],
+    },
+    {
+      // Path B, negative/guardrail. Turn 1 is the exact standing regression guard for the
+      // d32c474 bug (a nav-only "show me" on a page whose content is full of highlight-adjacent
+      // language must never draw an unsolicited highlight_element). Turn 2 proves naming a real
+      // CATEGORY of thing that has no matching id on the live list (Zendesk isn't documented,
+      // unlike Salesforce/HubSpot on the very same page) never invents a highlight target just
+      // because the page itself is topically relevant.
+      id: 'auto-highlight-guardrails',
+      category: 'highlight',
+      persona: 'Visitor whose requests must NOT trigger an unsolicited or fabricated highlight',
+      turns: [
+        {
+          prompt: `Can you show me the ${clientCommandsRoute.title} docs?`,
+          expectTools: ['navigate_to_page'],
+          expectNavPath: clientCommandsRoute.url,
+          forbidTools: ['highlight_element'],
+          skipCompleteness: true,
+        },
+        {
+          prompt: 'How do I send leads to Zendesk?',
+          forbidTools: ['highlight_element'],
+        },
+      ],
+    },
+    {
+      // provision.mjs's obeyRules now says a navigate_to_page not-found is Nova's own mistake to
+      // silently answer around, never something to narrate — resolveRoute's exact-match-only
+      // contract (router.js) means not-found can only happen from a self-inflicted hallucinated
+      // path, so confessing a failed attempt just makes a correct-looking agent sound broken.
+      // simulateNavNotFound forces the ack for a REAL path so this is tested independent of a
+      // noInventedPath (path-fabrication) failure.
+      id: 'nav-not-found-no-confession',
+      category: 'navigation',
+      persona: 'Visitor asks for a real page whose navigation ack comes back not-found (forced, to isolate the confession behavior)',
+      turns: [
+        { prompt: 'Take me to the Getting Started page.', simulateNavNotFound: true, skipCompleteness: true },
       ],
     },
     {

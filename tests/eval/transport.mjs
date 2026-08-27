@@ -38,6 +38,25 @@ export function resolveRoute(path, routes) {
   return routes.find((r) => r.url === path) || routes.find((r) => norm(r.url) === norm(path)) || null;
 }
 
+/**
+ * The same `{id,label}` list the real browser's `highlighter.js` computes for a page
+ * (`currentTargets()`): tagged `data-nova-target` elements first, then every `##`/`###`
+ * heading, deduped by id keeping the first occurrence. Without this, a headless nav ACK
+ * carries no `highlightable` list at all, so the brain has nothing live to check a
+ * same-turn highlight_element call against — this is what makes the auto-highlight-after-
+ * navigation behavior (provision.mjs's Path B) testable headlessly in the first place.
+ */
+export function highlightableForRoute(url, siteData) {
+  const seen = new Set();
+  const out = [];
+  for (const t of [...(siteData?.highlightTargets || []), ...(siteData?.headingTargets || [])]) {
+    if (t.url !== url || seen.has(t.id)) continue;
+    seen.add(t.id);
+    out.push({ id: t.id, label: t.label });
+  }
+  return out;
+}
+
 async function ackTool(ksStr, call, response, fetchImpl) {
   const id = call.toolMetadata?.id;
   if (id) {
@@ -50,9 +69,16 @@ async function ackTool(ksStr, call, response, fetchImpl) {
   return response;
 }
 
-function ackNavigate(ksStr, call, routes, fetchImpl) {
-  const route = resolveRoute(call.args?.path, routes);
-  const response = route ? { ok: true, path: route.url } : { ok: false, error: 'not_found' };
+// `simulateNavNotFound` is opt-in per turn (personas.mjs), symmetric to `ackHighlight`'s
+// `forceAck` — it exercises the genuinely-not-found nav branch on demand (a hallucinated path
+// is otherwise the ONLY way to hit it, which probeNoInventedPath already blocking-fails on, so
+// without this override there is no way to test the "don't confess a failed nav attempt" rule
+// in isolation from a path-fabrication failure).
+function ackNavigate(ksStr, call, routes, siteData, fetchImpl, simulateNavNotFound) {
+  const route = simulateNavNotFound ? null : resolveRoute(call.args?.path, routes);
+  const response = route
+    ? { ok: true, path: route.url, highlightable: highlightableForRoute(route.url, siteData) }
+    : { ok: false, error: 'not_found' };
   return ackTool(ksStr, call, response, fetchImpl);
 }
 
@@ -78,8 +104,13 @@ function ackHighlight(ksStr, call, fetchImpl, forceAck) {
  * @param {string} opts.message
  * @param {string|null} [opts.threadId]
  * @param {{url:string}[]} opts.routes
+ * @param {object} [opts.siteData] full site-data.mjs output — needed so a successful nav ack can
+ *   carry a real `highlightable` list, exactly like production `navigator.js` does after a page
+ *   swap. Optional only for callers that don't exercise navigate_to_page.
  * @param {{ok:boolean, id?:string, label?:string}} [opts.highlightAck] simulated success ack for
  *   highlight_element — see ackHighlight's comment for why this is opt-in per turn.
+ * @param {boolean} [opts.simulateNavNotFound] force navigate_to_page's ack to `{ok:false,
+ *   error:'not_found'}` even for a real path — see ackNavigate's comment.
  * @param {object} [opts.capabilities] per-message capabilities override, forwarded verbatim to
  *   `conversations.stream()` (e.g. `{use_knowledge_base:'on'}` to probe RAG for one turn without
  *   touching the live agent's stored capability state — see conversations.stream()'s doc comment
@@ -92,7 +123,7 @@ function ackHighlight(ksStr, call, fetchImpl, forceAck) {
  *   the run finished and printed its report (the CLI never actually exited).
  * @returns {Promise<{text:string, threadId:string|null, toolCalls:object[], acks:object[], rawToolSegCount:number, spiralDetected:boolean, spiralRecovered:boolean}>}
  */
-export async function streamTurnWithAck({ management, configId, message, threadId, routes, highlightAck, capabilities, fetchImpl = fetch, signal }) {
+export async function streamTurnWithAck({ management, configId, message, threadId, routes, siteData, highlightAck, simulateNavNotFound, capabilities, fetchImpl = fetch, signal }) {
   async function runOnce(userMessage, tid) {
     const token = await management.sessions.createConversationToken({ configId });
     const ksStr = ksString(token);
@@ -113,7 +144,7 @@ export async function streamTurnWithAck({ management, configId, message, threadI
         toolCalls.push(call);
         if (call.toolMetadata?.waitForResponse) {
           if (call.name === 'navigate_to_page') {
-            acks.push({ name: call.name, response: await ackNavigate(ksStr, call, routes, fetchImpl) });
+            acks.push({ name: call.name, response: await ackNavigate(ksStr, call, routes, siteData, fetchImpl, simulateNavNotFound) });
           } else if (call.name === 'highlight_element') {
             acks.push({ name: call.name, response: await ackHighlight(ksStr, call, fetchImpl, highlightAck) });
           }
