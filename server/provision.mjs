@@ -20,7 +20,10 @@
  * mirroring earnings-avatar-q2's upsertToolFromList pattern. A `--reuse` run
  * deletes the PREVIOUS knowledge category/record/entries (see deleteKnowledge)
  * before wireKnowledge mints a new one, so repeated redeploys (e.g. from CI)
- * don't orphan a fresh corpus on every run.
+ * don't orphan a fresh corpus on every run — UNLESS the site's docs hash
+ * identically to the last successful `--reuse` deploy's (see hashDocs), in
+ * which case the existing knowledge category/record/entries are reused as-is
+ * and the teardown/re-upload/indexing-wait is skipped entirely.
  *
  * Run:  AGENTIC_PARTNER_ID=… AGENTIC_ADMIN_SECRET=… node server/provision.mjs
  *       [--site-dir <path>]                  # read the docs site's src/**\/*.md from
@@ -30,11 +33,12 @@
  *       [--avatar-id <existingAvatarId>]      # skip preset pick, use this avatar as-is
  *       [--agent-id <existingAgentId>]        # update this agent in place, keep its widgetId
  *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag,
- *         knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, provisionedAt },
+ *         knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, docsHash, provisionedAt },
  *         first backing up any PREVIOUS agent.json to server/agent.json.bak
  * Teardown:  node server/provision.mjs --cleanup
  */
 import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Management } from '../vendor/sdk/src/management/index.js';
@@ -244,6 +248,16 @@ async function loadDocContent(siteDir, docs) {
   }
 }
 
+/** Deterministic fingerprint of every doc's path + content, in load order — lets provision()
+ * recognize "the site's docs are byte-identical to the last successful --reuse deploy" and skip
+ * the expensive knowledge teardown/re-upload/indexing-wait entirely instead of redoing it on
+ * every redeploy regardless of whether anything actually changed. */
+export function hashDocs(docs) {
+  const h = createHash('sha256');
+  for (const d of docs) h.update(`${d.file}\n${d.markdown}\n `);
+  return h.digest('hex');
+}
+
 /** Compact "which page is which" block, grouped exactly as the site's own sidebar
  * (nav.js) groups them — the brain cites a page by TITLE, uses the labeled `path`
  * verbatim as navigate_to_page's arg, and cites the absolute URL when a link is
@@ -352,44 +366,59 @@ async function provision() {
   const docs = await loadDocs(siteDir);
   console.log(`✓ found ${docs.length} docs under ${siteDir}`);
   await loadDocContent(siteDir, docs);
+  const docsHash = hashDocs(docs);
 
   // Redeploying the SAME intellect would otherwise orphan its previous knowledge
   // category/record/entries — wireKnowledge below always mints a fresh one, and once this
   // run's ids overwrite agent.json, cleanup can no longer find the old ones. Only tear down
   // when prevSaved really is a snapshot of the intellect being reused, not stale/unrelated state.
-  if (reuseConfigId && prevSaved.configId === reuseConfigId && (prevSaved.knowledgeRecordId || prevSaved.knowledgeCategoryId)) {
-    console.log('✓ removing previous knowledge corpus before re-upload (avoids orphaning it)');
-    await deleteKnowledge(admin, prevSaved);
-  }
+  const reusingSameIntellect = reuseConfigId && prevSaved.configId === reuseConfigId && (prevSaved.knowledgeRecordId || prevSaved.knowledgeCategoryId);
+  // The docs this intellect is grounded on are read fresh from --site-dir every run, but a
+  // redeploy is often triggered (manually, or by an unrelated provision.mjs code change) with
+  // no actual change to the site's own content. When the fingerprint matches the last successful
+  // --reuse deploy's, the existing knowledge category/record/entries are already correct and
+  // already indexed — skip the teardown/re-upload/indexing-wait below entirely.
+  const knowledgeUnchanged = reusingSameIntellect && prevSaved.docsHash === docsHash;
 
-  const { categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs);
-
-  // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
-  // send it in that single add/update call alongside knowledge_ids — never as a follow-up
-  // setCapability patch. This SDK's own docs (CLIENT-COMMANDS.md "Gotcha 2") say partner config
-  // is Redis-cached ~24h server-side and a capability flip on an EXISTING intellect won't reach
-  // converse time until that cache expires; a two-step create/update-then-setCapability sequence
-  // additionally risks the cache latching onto the transient 'off' value written in step one
-  // instead of ever seeing step two's 'on'. Polling first and writing once removes that race for
-  // a fresh create (no cache entry yet, so the single write lands immediately) — a `--reuse`
-  // redeploy of an intellect the runtime has already cached is still subject to that ~24h delay
-  // regardless of how the write is sequenced; that part is a platform limitation, not something
-  // this file can work around.
-  // kaltura.knowledge.isIndexed() reads the knowledge record's own container-lifecycle
-  // status ('READY'/'DELETED') — it reads READY the instant the record exists, before any
-  // of the entries just uploaded have actually finished indexing, so polling it here never
-  // tells us anything more on a later attempt than it did on the first. The real per-entry
-  // signal (kaltura.knowledge.entryStatus(), POST /v1/knowledge/entry_status) isn't GA in
-  // production yet (general rollout expected early September 2026) and per Kaltura shouldn't
-  // be relied on until then. Until it lands, budget a fixed best-effort wait instead —
-  // matches the same pattern documented in the SDK's own docs/api/build.md.
+  let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, indexed;
   const INDEX_WAIT_MS = 80000; // matches the "45-90s+" async_search_knowledge_base estimate below
-  console.log(`… waiting ${INDEX_WAIT_MS / 1000}s (best-effort — not a real completion check, see comment above) for knowledge record ${knowledgeRecordId} to finish indexing before enabling RAG`);
-  await sleep(INDEX_WAIT_MS);
-  // TODO: once kaltura.knowledge.entryStatus() is GA (~Sept 2026), replace this fixed wait
-  // with a real poll: kaltura.knowledge.entryStatus(knowledgeRecordId, knowledgeEntryIds, admin)
-  // until every entry's documents report a non-null status.
-  const indexed = true;
+  if (knowledgeUnchanged) {
+    ({ knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds } = prevSaved);
+    indexed = true;
+    console.log(`✓ docs unchanged since last deploy (hash ${docsHash.slice(0, 12)}…) — reusing knowledge category ${knowledgeCategoryId}/record ${knowledgeRecordId}, skipping teardown/re-upload/${INDEX_WAIT_MS / 1000}s indexing wait`);
+  } else {
+    if (reusingSameIntellect) {
+      console.log('✓ removing previous knowledge corpus before re-upload (avoids orphaning it)');
+      await deleteKnowledge(admin, prevSaved);
+    }
+    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs));
+
+    // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
+    // send it in that single add/update call alongside knowledge_ids — never as a follow-up
+    // setCapability patch. This SDK's own docs (CLIENT-COMMANDS.md "Gotcha 2") say partner config
+    // is Redis-cached ~24h server-side and a capability flip on an EXISTING intellect won't reach
+    // converse time until that cache expires; a two-step create/update-then-setCapability sequence
+    // additionally risks the cache latching onto the transient 'off' value written in step one
+    // instead of ever seeing step two's 'on'. Polling first and writing once removes that race for
+    // a fresh create (no cache entry yet, so the single write lands immediately) — a `--reuse`
+    // redeploy of an intellect the runtime has already cached is still subject to that ~24h delay
+    // regardless of how the write is sequenced; that part is a platform limitation, not something
+    // this file can work around.
+    // kaltura.knowledge.isIndexed() reads the knowledge record's own container-lifecycle
+    // status ('READY'/'DELETED') — it reads READY the instant the record exists, before any
+    // of the entries just uploaded have actually finished indexing, so polling it here never
+    // tells us anything more on a later attempt than it did on the first. The real per-entry
+    // signal (kaltura.knowledge.entryStatus(), POST /v1/knowledge/entry_status) isn't GA in
+    // production yet (general rollout expected early September 2026) and per Kaltura shouldn't
+    // be relied on until then. Until it lands, budget a fixed best-effort wait instead —
+    // matches the same pattern documented in the SDK's own docs/api/build.md.
+    console.log(`… waiting ${INDEX_WAIT_MS / 1000}s (best-effort — not a real completion check, see comment above) for knowledge record ${knowledgeRecordId} to finish indexing before enabling RAG`);
+    await sleep(INDEX_WAIT_MS);
+    // TODO: once kaltura.knowledge.entryStatus() is GA (~Sept 2026), replace this fixed wait
+    // with a real poll: kaltura.knowledge.entryStatus(knowledgeRecordId, knowledgeEntryIds, admin)
+    // until every entry's documents report a non-null status.
+    indexed = true;
+  }
 
   const siteMap = buildSiteMap(docs);
 
@@ -564,7 +593,7 @@ async function provision() {
 
   const out = {
     configId, avatarId: avatar.id, agentId, widgetId, tag: TAG,
-    knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds,
+    knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, docsHash,
     provisionedAt: new Date().toISOString(),
   };
   const prevAgentJson = await readFile(OUT, 'utf8').catch(() => null);
@@ -572,7 +601,9 @@ async function provision() {
   await writeFile(OUT, JSON.stringify(out, null, 2) + '\n');
   console.log('\n✅ provisioned. Wrote', OUT);
   console.log(JSON.stringify(out, null, 2));
-  console.log(`\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after an ${INDEX_WAIT_MS / 1000}s best-effort wait (no real completion signal yet — see the comment above the wait).`);
+  console.log(knowledgeUnchanged
+    ? `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, reused as-is (docs unchanged, no re-upload/wait needed).`
+    : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after an ${INDEX_WAIT_MS / 1000}s best-effort wait (no real completion signal yet — see the comment above the wait).`);
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }

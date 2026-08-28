@@ -9,7 +9,7 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
-  extractTopLevelHeadings, buildSiteMap, buildBaseDirective, PERSONA_NAME, OPENING_PHRASE,
+  extractTopLevelHeadings, buildSiteMap, buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 
@@ -227,6 +227,28 @@ test('buildSiteMap: a page with no topics has no trailing " — topics:" suffix'
   const docs = [{ group: 'Home', title: 'Home', url: '/', topics: [] }];
   const map = buildSiteMap(docs);
   assert.ok(!map.includes('topics:'));
+});
+
+/* hashDocs — the fingerprint provision() uses to skip re-uploading an unchanged knowledge base */
+test('hashDocs: identical file+markdown pairs hash identically', () => {
+  const docs = [{ file: 'index.md', markdown: '# Home\n\nBody.' }];
+  assert.equal(hashDocs(docs), hashDocs([{ file: 'index.md', markdown: '# Home\n\nBody.' }]));
+});
+test('hashDocs: a one-character content change changes the hash', () => {
+  const a = [{ file: 'index.md', markdown: '# Home\n\nBody.' }];
+  const b = [{ file: 'index.md', markdown: '# Home\n\nBody!' }];
+  assert.notEqual(hashDocs(a), hashDocs(b));
+});
+test('hashDocs: order matters — same docs in a different order hash differently', () => {
+  const a = [{ file: 'a.md', markdown: 'A' }, { file: 'b.md', markdown: 'B' }];
+  const b = [{ file: 'b.md', markdown: 'B' }, { file: 'a.md', markdown: 'A' }];
+  assert.notEqual(hashDocs(a), hashDocs(b));
+});
+test('hashDocs: content shifted across a file boundary does not collide', () => {
+  // Without a separator between docs, ['a','bc'] and ['ab','c'] would hash identically.
+  const a = [{ file: 'x.md', markdown: 'a' }, { file: 'y.md', markdown: 'bc' }];
+  const b = [{ file: 'x.md', markdown: 'ab' }, { file: 'y.md', markdown: 'c' }];
+  assert.notEqual(hashDocs(a), hashDocs(b));
 });
 
 /* persona identity lint (issue #32) — Nova's real shape: PERSONA_NAME is declared
