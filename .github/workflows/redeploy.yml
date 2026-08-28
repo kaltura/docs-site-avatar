@@ -71,7 +71,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add server/agent.json
-          git commit -m "Update server/agent.json after redeploy [skip ci]"
+          git commit -m "Update server/agent.json after redeploy"
           git push -u origin "$BRANCH"
           gh pr create --base main --head "$BRANCH" \
             --title "Sync server/agent.json after redeploy" \
