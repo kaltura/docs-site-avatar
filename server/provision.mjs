@@ -285,7 +285,7 @@ const KEY_FACTS = `
 - Package: @kaltura/intelligent-agents — a zero-runtime-dependency JavaScript SDK (ESM + JSDoc) for building and operating Kaltura Agentic Avatars.
 - Two entry points: ./management (provision/configure/measure agents, server-side) and ./experience (the live socket+WHEP runtime, browser).
 - Optional plugin subpaths that don't bloat the base runtime: ./experience/presenter (deck-walkthrough), ./experience/genui (widget rendering), ./experience/analytics (KAVA events), ./experience/noise-suppressor (AudioWorklet noise gate).
-- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.7.0 (.../gh/kaltura/intelligent-agents-sdk@v1.7.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
+- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.8.0 (.../gh/kaltura/intelligent-agents-sdk@v1.8.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
 - Conversations run over two interchangeable transports: KalturaAvatarSession (live avatar video over WebRTC + socket) and KalturaChatSession (text-only over HTTP streaming — no camera, mic, or WebRTC at all). KalturaAgentSession wraps both and can switch mid-conversation with switchMode(), keeping the same thread, memory, tools, and request variables — the modeChanged event reports threadContinuity: true when the conversation carried over.
 - Client-supplied request_vars sent WITH a converse message are gated: the intellect must have allow_client_variables set to true (toggle via intellects.setClientVariablesEnabled). With the gate off the turn fails SILENTLY as an empty reply — no error reaches the wire on either transport, because the server rejects after the response stream has opened. Both experience session classes emit a once-per-session warning event (code empty_turn_with_request_vars, naming the offending keys); the management SDK's converse helpers surface a typed client_variables_disabled error only in the pre-stream case. Reserved sys__ variables (like sys__user_id) are server-injected every turn and rejected if a client tries to set them, regardless of that gate.
 - License: MIT. No Kaltura account is needed to read, fork, or build on the source; a Kaltura account with the Agentic Avatar feature enabled is needed to call the live APIs it wraps.
@@ -375,19 +375,21 @@ async function provision() {
   // redeploy of an intellect the runtime has already cached is still subject to that ~24h delay
   // regardless of how the write is sequenced; that part is a platform limitation, not something
   // this file can work around.
-  console.log(`… polling knowledge record ${knowledgeRecordId} for indexing completion (RAG over a cold index can loop async_search_knowledge_base for 45-90s+)`);
-  const INDEX_POLL_DELAYS_MS = [5000, 10000, 15000, 20000, 30000]; // ~80s total after the immediate check, matching the "45-90s+" estimate above
-  let indexed = false;
-  for (let attempt = 0; !indexed; attempt++) {
-    const status = await kaltura.knowledge.isIndexed(knowledgeRecordId, admin);
-    if (status.ready) { indexed = true; break; }
-    const delay = INDEX_POLL_DELAYS_MS[attempt];
-    if (delay === undefined) break;
-    console.log(`… knowledge record ${knowledgeRecordId} not indexed yet (status: ${status.status}), waiting ${delay / 1000}s before next check`);
-    await sleep(delay);
-  }
-  if (indexed) console.log('✓ knowledge indexed — use_knowledge_base will be set to \'on\'');
-  else console.warn(`⚠ knowledge record ${knowledgeRecordId} still not indexed after ~80s — use_knowledge_base will stay 'off'. Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin) until {ready:true}, then re-run provisioning.`);
+  // kaltura.knowledge.isIndexed() reads the knowledge record's own container-lifecycle
+  // status ('READY'/'DELETED') — it reads READY the instant the record exists, before any
+  // of the entries just uploaded have actually finished indexing, so polling it here never
+  // tells us anything more on a later attempt than it did on the first. The real per-entry
+  // signal (kaltura.knowledge.entryStatus(), POST /v1/knowledge/entry_status) isn't GA in
+  // production yet (general rollout expected early September 2026) and per Kaltura shouldn't
+  // be relied on until then. Until it lands, budget a fixed best-effort wait instead —
+  // matches the same pattern documented in the SDK's own docs/api/build.md.
+  const INDEX_WAIT_MS = 80000; // matches the "45-90s+" async_search_knowledge_base estimate below
+  console.log(`… waiting ${INDEX_WAIT_MS / 1000}s (best-effort — not a real completion check, see comment above) for knowledge record ${knowledgeRecordId} to finish indexing before enabling RAG`);
+  await sleep(INDEX_WAIT_MS);
+  // TODO: once kaltura.knowledge.entryStatus() is GA (~Sept 2026), replace this fixed wait
+  // with a real poll: kaltura.knowledge.entryStatus(knowledgeRecordId, knowledgeEntryIds, admin)
+  // until every entry's documents report a non-null status.
+  const indexed = true;
 
   const siteMap = buildSiteMap(docs);
 
@@ -464,10 +466,11 @@ async function provision() {
     capabilities: {
       avatar: 'on',
       avatar_filler: 'off',
-      // Resolved above, before this intellect is created/updated, from polling
-      // kaltura.knowledge.isIndexed() on the record just uploaded — see the
-      // comment above wireKnowledge's call site for why this is set here,
-      // in the same write, rather than via a follow-up setCapability call.
+      // Resolved above, before this intellect is created/updated, after the
+      // fixed best-effort indexing wait — see the comment above that wait for
+      // why there's no real completion signal to check yet, and why this is
+      // set here, in the same write, rather than via a follow-up setCapability
+      // call.
       use_knowledge_base: indexed ? 'on' : 'off',
       use_content_search: 'disabled',
       use_get_entry_content: 'disabled',
@@ -569,12 +572,7 @@ async function provision() {
   await writeFile(OUT, JSON.stringify(out, null, 2) + '\n');
   console.log('\n✅ provisioned. Wrote', OUT);
   console.log(JSON.stringify(out, null, 2));
-  if (indexed) {
-    console.log(`\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}.`);
-  } else {
-    console.log(`\nKnowledge base wired but still INACTIVE (use_knowledge_base:'off') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}.`);
-    console.log(`Check kaltura.knowledge.isIndexed(${knowledgeRecordId}, admin) until {ready:true}, then re-run \`node server/provision.mjs --reuse ${configId} ...\` so the flip to 'on' lands in the same write as everything else, not a bare setCapability call on an intellect the runtime may already have cached.`);
-  }
+  console.log(`\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after an ${INDEX_WAIT_MS / 1000}s best-effort wait (no real completion signal yet — see the comment above the wait).`);
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
