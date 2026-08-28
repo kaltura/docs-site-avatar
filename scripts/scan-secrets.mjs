@@ -81,12 +81,20 @@ const PATTERNS = [
   ['generic hex secret (32+ chars)', /\b[0-9a-f]{32,}\b/i],
 ];
 
+// docsHash in server/agent.json is a content fingerprint (see hashDocs() in
+// server/provision.mjs), not a secret, but is the same 32+ hex shape as the
+// generic pattern above — strip it before that one check runs.
+const KNOWN_SAFE_HEX_FIELDS = [/"docsHash"\s*:\s*"[0-9a-f]+"/g];
+
 function scanForPatterns() {
   const offenders = [];
   for (const f of scanFiles()) {
     const content = read(f);
     for (const [name, re] of PATTERNS) {
-      const m = content.match(re);
+      const target = name === 'generic hex secret (32+ chars)'
+        ? KNOWN_SAFE_HEX_FIELDS.reduce((c, safe) => c.replace(safe, ''), content)
+        : content;
+      const m = target.match(re);
       if (m) offenders.push({ file: f, pattern: name, match: m[0].slice(0, 12) + '…' });
     }
   }
