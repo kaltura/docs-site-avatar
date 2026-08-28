@@ -121,8 +121,8 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Which exact version tag does the quick-start on the home page pin the jsDelivr import to?',
           capabilities: { use_knowledge_base: 'on' },
-          // Voice-styled answers verbalize version numbers ("one point seven point zero").
-          relevanceAny: ['1.7.0', 'one point seven'],
+          // Voice-styled answers verbalize version numbers ("one point eight point zero").
+          relevanceAny: ['1.8.0', 'one point eight'],
         },
         {
           prompt: 'What methods does the intellect secrets API expose, and is deleting a secret reversible?',
