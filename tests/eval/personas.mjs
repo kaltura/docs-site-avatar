@@ -374,9 +374,11 @@ export function buildPersonas(siteData) {
     {
       // Path B, positive: the visitor's own words name a specific real thing (never a "show me"/
       // "point out" meta-request) that turns out to be on the destination page's highlightable
-      // list — provision.mjs's obeyRules now says this should fire navigate_to_page AND
-      // highlight_element in the SAME reply, unprompted. Turn 2 stays on the same page (no fresh
-      // nav expected) to prove the target-matching half works even without a same-turn nav call.
+      // list — provision.mjs's obeyRules says this should fire navigate_to_page, and then, once
+      // that call's own ack comes back with a live highlightable match, highlight_element right
+      // after — two sequential, ack-driven calls, never bundled without waiting for the first
+      // one's response. Turn 2 stays on the same page (no fresh nav expected) to prove the
+      // target-matching half works even without a same-turn nav call.
       id: 'auto-highlight-after-nav',
       category: 'highlight',
       persona: 'Visitor whose question names a specific real integration, never asking to be "shown" or "pointed at" anything',
