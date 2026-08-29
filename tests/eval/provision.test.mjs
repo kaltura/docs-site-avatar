@@ -9,7 +9,7 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
-  extractTopLevelHeadings, extractHighlightables, buildSiteMap, buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs,
+  extractTopLevelHeadings, buildSiteMap, buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 
@@ -48,33 +48,6 @@ test('extractTopLevelHeadings: empty array when there are no ## headings', () =>
 });
 test('extractTopLevelHeadings: strips CommonMark\'s optional closing # sequence', () => {
   assert.deepEqual(extractTopLevelHeadings('## Title ##'), ['Title']);
-});
-
-/* extractHighlightables */
-test('extractHighlightables: collects ## and ### headings, slugified, in order', () => {
-  const md = '# Title\n\n## First Section\n\nBody.\n\n### A Sub Section\n\nMore.';
-  assert.deepEqual(extractHighlightables(md), [
-    { id: 'first-section', label: 'First Section' },
-    { id: 'a-sub-section', label: 'A Sub Section' },
-  ]);
-});
-test('extractHighlightables: data-nova-target divs come before headings, in document order', () => {
-  const md = '# Title\n\n## A Heading\n\n<div data-nova-target="widget" data-nova-label="The Widget">Body</div>';
-  assert.deepEqual(extractHighlightables(md), [
-    { id: 'widget', label: 'The Widget' },
-    { id: 'a-heading', label: 'A Heading' },
-  ]);
-});
-test('extractHighlightables: empty array when there are no headings or tagged divs', () => {
-  assert.deepEqual(extractHighlightables('# Title\n\nJust intro text.'), []);
-});
-test('extractHighlightables: dedupes by id — first occurrence wins', () => {
-  const md = '<div data-nova-target="widget" data-nova-label="First">A</div>\n\n## Widget\n\nBody.';
-  assert.deepEqual(extractHighlightables(md), [{ id: 'widget', label: 'First' }]);
-});
-test('extractHighlightables: skips heading-like lines inside fenced code blocks', () => {
-  const md = '# Title\n\n## Real Section\n\n```md\n## fenced fake heading\n```\n\nBody.';
-  assert.deepEqual(extractHighlightables(md), [{ id: 'real-section', label: 'Real Section' }]);
 });
 
 /* splitIntoSections */
@@ -254,19 +227,6 @@ test('buildSiteMap: a page with no topics has no trailing " — topics:" suffix'
   const docs = [{ group: 'Home', title: 'Home', url: '/', topics: [] }];
   const map = buildSiteMap(docs);
   assert.ok(!map.includes('topics:'));
-});
-test('buildSiteMap: a page\'s highlightables render as indented informational bullets, one per line', () => {
-  const docs = [{
-    group: 'Guides', title: 'Integrations', url: '/guides/integrations/', topics: [],
-    highlightables: [{ id: 'hubspot', label: 'HubSpot' }, { id: 'salesforce', label: 'Salesforce' }],
-  }];
-  const map = buildSiteMap(docs);
-  assert.match(map, /- Integrations — path: \/guides\/integrations\/ \(cite as: .+\)\n  - highlightable \(informational only\): "HubSpot" → hubspot\n  - highlightable \(informational only\): "Salesforce" → salesforce/);
-});
-test('buildSiteMap: a page with no highlightables has no highlightable bullets', () => {
-  const docs = [{ group: 'Home', title: 'Home', url: '/', topics: [], highlightables: [] }];
-  const map = buildSiteMap(docs);
-  assert.ok(!map.includes('highlightable'));
 });
 
 /* hashDocs — the fingerprint provision() uses to skip re-uploading an unchanged knowledge base */
