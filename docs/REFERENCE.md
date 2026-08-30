@@ -10,6 +10,7 @@
 | `load-env.mjs` | Dependency-free `.env` parser used by every entry point |
 | `site-root.mjs` | Resolves the docs-site checkout path (`resolveSiteDir`/`stripSiteDirFlag`) |
 | `scripts/fetch-sdk.mjs` | Vendors `@kaltura/intelligent-agents` from jsDelivr into `vendor/sdk/` |
+| `scripts/audit-knowledge-records.mjs` | Finds and cleans up leaked Knowledge-record shells left behind by `--reuse` redeploys (see ARCHITECTURE.md's "Known limitations") |
 | `vendor/sdk/` | Gitignored — the fetched SDK source, populated by `postinstall` |
 | `server/provision.mjs` | Creates/redeploys/tears down Nova's live intellect, avatar, agent, knowledge base |
 | `server/agent.json` | Committed — the live resource IDs `provision.mjs` writes and every other command (incl. `redeploy.yml`) reads |
@@ -78,6 +79,15 @@ Exits non-zero when `summary.healthy` is false (any release-blocking failure or 
 | `--tag vX.Y.Z` / `--tag=vX.Y.Z` | Vendor this tag instead of the default (`DEFAULT_TAG` in `scripts/fetch-sdk.mjs`) |
 | `SDK_TAG` | Same, read when `--tag` is omitted |
 | `--force` | Re-fetch even if `vendor/sdk/.sdk-tag` already matches the target tag |
+
+## `scripts/audit-knowledge-records.mjs` flags
+
+| Flag | Effect |
+|---|---|
+| *(none)* | Dry run — list candidate leaked records, make no delete calls |
+| `--delete` | Attempt `deleteRecord` on every candidate; a 500 on a previously-indexed shell is expected and reported separately from a clean delete |
+
+Only considers records named exactly `docs-site-avatar-knowledge` (this deploy's own naming convention) or unnamed, and always excludes the active record (`server/agent.json`'s `knowledgeRecordId`) — this partner is shared with other unrelated products, so it never touches a record with any other name.
 
 ## GitHub Actions workflows
 

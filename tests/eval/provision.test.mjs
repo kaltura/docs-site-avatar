@@ -10,6 +10,7 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
   extractTopLevelHeadings, buildSiteMap, buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs,
+  checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 
@@ -263,4 +264,28 @@ test('persona identity lint: Nova\'s real shape (name-only, no name-bearing open
     prompts: [{ value: PERSONA_NAME }],
   });
   assert.deepEqual(r.findings, []);
+});
+
+/* checkCustomPromptSchema — drift check for Application#getCustomPrompts'
+   backend schema (see the Nova adoption plan, § getCustomPrompts). */
+test('checkCustomPromptSchema: clean when every required key is present', () => {
+  const r = checkCustomPromptSchema(['goal', 'targetAudience', 'restrictedTopics', 'name', 'knowledge']);
+  assert.equal(r.clean, true);
+  assert.deepEqual(r.missing, []);
+});
+test('checkCustomPromptSchema: reports a dropped/renamed required key', () => {
+  const r = checkCustomPromptSchema(['goal', 'targetAudience', 'name', 'knowledge']);
+  assert.equal(r.clean, false);
+  assert.deepEqual(r.missing, ['restrictedTopics']);
+});
+test('checkCustomPromptSchema: a field beyond the required set is reported as extra, not missing', () => {
+  const r = checkCustomPromptSchema(['goal', 'targetAudience', 'restrictedTopics', 'name', 'knowledge', 'tone']);
+  assert.equal(r.clean, true);
+  assert.deepEqual(r.extra, ['knowledge', 'tone']);
+});
+test('checkCustomPromptSchema: defaults to REQUIRED_CUSTOM_PROMPT_KEYS when no override is passed', () => {
+  const r = checkCustomPromptSchema(REQUIRED_CUSTOM_PROMPT_KEYS);
+  assert.equal(r.clean, true);
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, []);
 });
