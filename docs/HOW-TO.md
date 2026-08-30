@@ -60,6 +60,20 @@ node server/provision.mjs --cleanup --only agent,avatar
 
 `--only` limits the scope to a comma-separated subset of `agent,avatar,intellect,knowledge`.
 
+## Audit and clean up leaked knowledge records
+
+```bash
+node scripts/audit-knowledge-records.mjs
+```
+
+Lists every leaked `docs-site-avatar-knowledge`-named or unnamed record on this partner that isn't the currently active one — see [docs/ARCHITECTURE.md](ARCHITECTURE.md)'s "Known limitations" for why these accumulate (one per `--reuse` redeploy, since `deleteRecord()` 500s on any record that ever reached indexed content). Dry run by default, no API calls. Then:
+
+```bash
+node scripts/audit-knowledge-records.mjs --delete
+```
+
+Attempts a real delete on every candidate. A 500 on a previously-indexed shell is expected and reported separately from a clean delete — it's an inert metadata object with no content and nothing live, not a repeat of the original orphan bug, and not fixable client-side. This partner is shared with other Kaltura products; the script never touches a record with any other name.
+
 ## Run the eval dashboard
 
 ```bash

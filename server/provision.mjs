@@ -299,7 +299,7 @@ const KEY_FACTS = `
 - Package: @kaltura/intelligent-agents — a zero-runtime-dependency JavaScript SDK (ESM + JSDoc) for building and operating Kaltura Agentic Avatars.
 - Two entry points: ./management (provision/configure/measure agents, server-side) and ./experience (the live socket+WHEP runtime, browser).
 - Optional plugin subpaths that don't bloat the base runtime: ./experience/presenter (deck-walkthrough), ./experience/genui (widget rendering), ./experience/analytics (KAVA events), ./experience/noise-suppressor (AudioWorklet noise gate).
-- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.8.0 (.../gh/kaltura/intelligent-agents-sdk@v1.8.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
+- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.10.0 (.../gh/kaltura/intelligent-agents-sdk@v1.10.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
 - Conversations run over two interchangeable transports: KalturaAvatarSession (live avatar video over WebRTC + socket) and KalturaChatSession (text-only over HTTP streaming — no camera, mic, or WebRTC at all). KalturaAgentSession wraps both and can switch mid-conversation with switchMode(), keeping the same thread, memory, tools, and request variables — the modeChanged event reports threadContinuity: true when the conversation carried over.
 - Client-supplied request_vars sent WITH a converse message are gated: the intellect must have allow_client_variables set to true (toggle via intellects.setClientVariablesEnabled). With the gate off the turn fails SILENTLY as an empty reply — no error reaches the wire on either transport, because the server rejects after the response stream has opened. Both experience session classes emit a once-per-session warning event (code empty_turn_with_request_vars, naming the offending keys); the management SDK's converse helpers surface a typed client_variables_disabled error only in the pre-stream case. Reserved sys__ variables (like sys__user_id) are server-injected every turn and rejected if a client tries to set them, regardless of that gate.
 - License: MIT. No Kaltura account is needed to read, fork, or build on the source; a Kaltura account with the Agentic Avatar feature enabled is needed to call the live APIs it wraps.
@@ -314,6 +314,27 @@ const KEY_FACTS = `
 
 export function buildBaseDirective() {
   return "You are Nova, the SDK Docs Assistant embedded on the @kaltura/intelligent-agents documentation site. You help visiting developers understand, learn, use, customize, integrate, and extend this SDK in their own apps — speak as a knowledgeable, friendly guide who has read every page of these docs, not as a generic support bot. You are exclusively grounded in this SDK's own documentation and source layout; never invent an API, endpoint, file path, or capability that isn't documented.";
+}
+
+// The 4 Application#getCustomPrompts keys the prompts[] block above actually
+// sends (goal/targetAudience/restrictedTopics/name) — the 5th real key,
+// `knowledge`, is never set here since Nova wires knowledge via knowledge_ids
+// directly (see the Nova adoption plan, § getCustomPrompts).
+export const REQUIRED_CUSTOM_PROMPT_KEYS = ['goal', 'targetAudience', 'restrictedTopics', 'name'];
+
+/**
+ * Drift-check for the backend's Application#getCustomPrompts schema, mirroring
+ * lintPersonaIdentity's warning-only shape: a missing key means the backend
+ * dropped/renamed a field provision.mjs's prompts[] block still depends on; an
+ * extra key is a notice only, never auto-adopted (syncing a generic
+ * headerTemplate over Nova's engineered prompt text would regress her
+ * refusal/citation behavior — see the Nova adoption plan, § getCustomPrompts).
+ */
+export function checkCustomPromptSchema(remoteKeys, requiredKeys = REQUIRED_CUSTOM_PROMPT_KEYS) {
+  const remote = new Set(remoteKeys);
+  const missing = requiredKeys.filter((k) => !remote.has(k));
+  const extra = [...remote].filter((k) => !requiredKeys.includes(k));
+  return { missing, extra, clean: missing.length === 0 };
 }
 
 /**
@@ -351,6 +372,25 @@ async function provision() {
 
   const admin = await kaltura.sessions.createAdminToken();
   console.log('✓ admin token');
+
+  // Startup drift check, not gating: confirms the backend's customPrompt
+  // schema still has every key the prompts[] block below depends on. See
+  // checkCustomPromptSchema's doc-comment for why an extra key is a notice,
+  // never auto-adopted.
+  try {
+    const customPrompts = await kaltura.application.getCustomPrompts(admin);
+    const schemaCheck = checkCustomPromptSchema(customPrompts.map((p) => p.key));
+    if (schemaCheck.missing.length) {
+      console.warn(`⚠ Application#getCustomPrompts is missing key(s) provision.mjs depends on: ${schemaCheck.missing.join(', ')} — the backend schema drifted; the prompts below still send them, but the backend may no longer recognize them.`);
+    } else {
+      console.log('✓ custom prompt schema clean — all required keys present');
+    }
+    if (schemaCheck.extra.length) {
+      console.log(`ℹ getCustomPrompts exposes field(s) beyond the required set: ${schemaCheck.extra.join(', ')} — not auto-adopted, see the Nova adoption plan § getCustomPrompts.`);
+    }
+  } catch (e) {
+    console.warn('⚠ could not check custom prompt schema (non-blocking):', e.message);
+  }
 
   const prevSaved = JSON.parse(await readFile(OUT, 'utf8').catch(() => '{}'));
 
