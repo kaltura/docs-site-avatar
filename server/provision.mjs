@@ -590,6 +590,12 @@ async function provision() {
     avatar = await kaltura.avatars.get(existingAvatarId, admin);
     console.log('✓ reusing existing avatar', avatar.id);
   } else {
+    // Reusing an intellect with no --avatar-id would otherwise silently mint a brand-new
+    // avatar and orphan the one already live under this configId — mirrors the tag-collision
+    // guard above: fail loud and name the fix, never drift.
+    if (reuseConfigId && prevSaved.configId === reuseConfigId && prevSaved.avatarId) {
+      throw new Error(`--reuse ${reuseConfigId} has a saved avatar (${prevSaved.avatarId} in agent.json) but --avatar-id was not passed — this would create a new avatar and orphan the existing one. Pass --avatar-id ${prevSaved.avatarId}.`);
+    }
     avatar = await kaltura.avatars.create({
       voice: { id: DEFAULT_VOICE_ID, speed: 1.0 },
       visual: { id: DEFAULT_VISUAL_ID, motionControl: { speaking: 0.6, nonSpeaking: 0.2 } },
