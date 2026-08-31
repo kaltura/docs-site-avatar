@@ -127,24 +127,6 @@ export function probeTools(expectation, toolCalls) {
   };
 }
 
-const TOOL_BUDGET_MAX = 3;
-
-// Both KB search tools are injected by the platform itself whenever
-// use_knowledge_base is 'on' — the brain habitually fires the sync/async pair
-// for one lookup, and no prompt rule has made that stick (see provision.mjs's
-// "search at most once per turn" rule). The budget exists to catch tool
-// spirals, not the platform's search habit, so all KB search calls in a turn
-// count as one budget slot. probeSingleToolCallPerTurn still flags a same-args
-// repeat of any tool, searches included.
-const KB_SEARCH_TOOLS = new Set(['search_knowledge_base', 'async_search_knowledge_base']);
-
-export function probeToolBudget(text, toolCalls) {
-  const calls = toolCalls || [];
-  const kbSearches = calls.filter((c) => KB_SEARCH_TOOLS.has(c.name)).length;
-  const count = calls.length - kbSearches + (kbSearches > 0 ? 1 : 0);
-  return { pass: count <= TOOL_BUDGET_MAX, count, max: TOOL_BUDGET_MAX };
-}
-
 export function probeCompleteness(expectation, text) {
   if (expectation.skipCompleteness) return null;
   const len = (text || '').trim().length;
@@ -162,16 +144,25 @@ export function probeRelevance(expectation, text) {
   return { pass: hit, keywords: expectation.relevanceAny };
 }
 
+// navigate_to_page and highlight_element are both one-call tools per provision.mjs's own
+// obeyRules ("both one-call tools: call each at most once per turn... treat that single call —
+// whatever it reports back — as the complete action for the turn"): more than one call to either
+// in a single turn is a stuck-loop/spiral signal regardless of whether the arguments differ.
+const STRICT_ONE_CALL_TOOLS = new Set(['navigate_to_page', 'highlight_element']);
+
+/**
+ * This is the harness's single spiral detector: any tool genuinely relevant to the turn is
+ * welcome to fire once each, no matter how many distinct tools that is — multiple different
+ * tools each firing once and each returning a usable result is normal, healthy behavior, not a
+ * budget violation. What's never fine is the same tool going back for a second bite in one turn.
+ */
 export function probeSingleToolCallPerTurn(toolCalls) {
   const byName = {};
   for (const c of toolCalls || []) (byName[c.name] ||= []).push(c);
   const offenders = [];
   for (const [name, calls] of Object.entries(byName)) {
     if (calls.length <= 1) continue;
-    // navigate_to_page: more than one nav target in a single turn is disorienting regardless of
-    // whether the paths differ — the SDK's Presenter enforces the same oneNavPerTurn rule
-    // client-side; this is the brain-side equivalent, so it stays strict on call count alone.
-    if (name === 'navigate_to_page') { offenders.push({ name, n: calls.length }); continue; }
+    if (STRICT_ONE_CALL_TOOLS.has(name)) { offenders.push({ name, n: calls.length }); continue; }
     // Other tools may legitimately retry once with a different guessed argument — that's the
     // anti-loop backstop in provision.mjs's obeyRules ("try a genuinely different approach at
     // most once more, then refuse"), not a bug. Only a repeated call with the SAME arguments
@@ -337,32 +328,19 @@ const FALSE_HIGHLIGHT_CLAIM_RE = /\bi(?:'ve| have)?\s+(?:just|now|already|succes
  * highlighted, or circled something on a turn where the tool never fired at all, or fired but
  * came back not-found. Most headless turns have no real page/DOM, so `ackHighlight` (see
  * transport.mjs) returns not-found by default — but specific personas can opt into a simulated
- * success ack (`simulateHighlightSuccess`) to exercise the flip side (see
- * probeHighlightSuccessNarration below); `acks` tells this probe which case it's looking at.
+ * success ack (`simulateHighlightSuccess`) to exercise that case; `acks` tells this probe which
+ * case it's looking at. Whether she also narrates a successful highlight in words is not checked
+ * here or anywhere else — only that the tool fired when the request merited it (`tools`,
+ * `autoHighlightFired`, `highlightTargetMatch`) and not when it didn't (`tools`'s `forbidTools`).
  */
 export function probeNoFalseHighlightClaim(toolCalls, text, acks) {
   const claimed = FALSE_HIGHLIGHT_CLAIM_RE.test(text || '');
   if (!claimed) return null;
   const succeeded = (acks || []).some((a) => a.name === 'highlight_element' && a.response?.ok);
-  // A claim right after a genuinely successful ack is the correct behavior, not a lie — that
-  // case belongs to probeHighlightSuccessNarration instead.
+  // A claim right after a genuinely successful ack is the correct behavior, not a lie.
   if (succeeded) return null;
   const fired = (toolCalls || []).some((c) => c.name === 'highlight_element');
   return { pass: false, fired, claimed };
-}
-
-/**
- * The flip side of probeNoFalseHighlightClaim: when highlight_element actually came back with a
- * successful ack (simulated via `simulateHighlightSuccess` on the persona turn, since a headless
- * run otherwise never has a real page/DOM to match against), Nova should tell the visitor she
- * pointed something out rather than staying silent about it or claiming she couldn't find it.
- * Not applicable when no highlight_element call ever succeeded this turn.
- */
-export function probeHighlightSuccessNarration(toolCalls, text, acks) {
-  const succeeded = (acks || []).some((a) => a.name === 'highlight_element' && a.response?.ok);
-  if (!succeeded) return null;
-  const claimed = FALSE_HIGHLIGHT_CLAIM_RE.test(text || '');
-  return { pass: claimed, claimed };
 }
 
 export function probeNoInventedApi(expectation, text) {
@@ -386,7 +364,6 @@ export function probeNoInventedApi(expectation, text) {
 export const DIMENSIONS = [
   'latency',
   'tools',
-  'toolBudget',
   'singleToolCallPerTurn',
   'noKbSearchWhenOff',
   'completeness',
@@ -400,7 +377,6 @@ export const DIMENSIONS = [
   'navPathMatch',
   'noInventedApi',
   'noFalseHighlightClaim',
-  'highlightSuccessNarration',
   'autoHighlightFired',
   'highlightTargetMatch',
   'noNavFailureConfession',
@@ -426,7 +402,6 @@ export function scoreTurn(turn, siteData) {
   const results = {
     latency: probeLatency(latencyMs),
     tools: probeTools(expectation, toolCalls),
-    toolBudget: probeToolBudget(text, toolCalls),
     singleToolCallPerTurn: probeSingleToolCallPerTurn(toolCalls),
     noKbSearchWhenOff: probeNoKbSearchWhenOff(expectation, toolCalls),
     completeness: probeCompleteness(expectation, text),
@@ -440,7 +415,6 @@ export function scoreTurn(turn, siteData) {
     navPathMatch: probeNavPathMatch(expectation, toolCalls, siteData),
     noInventedApi: probeNoInventedApi(expectation, text),
     noFalseHighlightClaim: probeNoFalseHighlightClaim(toolCalls, text, acks),
-    highlightSuccessNarration: probeHighlightSuccessNarration(toolCalls, text, acks),
     autoHighlightFired: probeAutoHighlightFired(expectation, toolCalls),
     highlightTargetMatch: probeHighlightTargetMatch(expectation, toolCalls),
     noNavFailureConfession: probeNoNavFailureConfession(expectation, text),
