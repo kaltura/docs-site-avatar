@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  toolNames, probeLatency, probeTools, probeToolBudget, probeCompleteness, probeRelevance,
+  toolNames, probeLatency, probeTools, probeCompleteness, probeRelevance,
   probeSingleToolCallPerTurn, probeNoKbSearchWhenOff, probeRestrictedTopicRefusal,
   probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probeNoInventedUrl, probeNoInventedPath,
-  probeNavPathMatch, probeNoInventedApi, probeNoFalseHighlightClaim, probeHighlightSuccessNarration,
+  probeNavPathMatch, probeNoInventedApi, probeNoFalseHighlightClaim,
   probeAutoHighlightFired, probeHighlightTargetMatch, probeNoNavFailureConfession,
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
@@ -52,38 +52,6 @@ test('tools: no expectations always passes', () => {
   assert.equal(r.pass, true);
 });
 
-/* tool budget */
-test('toolBudget: within budget passes', () => {
-  const r = probeToolBudget('here', [{ name: 'navigate_to_page' }]);
-  assert.equal(r.pass, true);
-});
-test('toolBudget: exceeding the cap fails', () => {
-  const r = probeToolBudget('here', Array.from({ length: 4 }, () => ({ name: 'highlight_element' })));
-  assert.equal(r.pass, false);
-});
-test('toolBudget: the platform-injected KB search pair counts as one slot', () => {
-  // sync+async search + get_experience_instructions + navigate = 4 raw calls, 3 budgeted.
-  const r = probeToolBudget('here', [
-    { name: 'search_knowledge_base' },
-    { name: 'async_search_knowledge_base' },
-    { name: 'get_experience_instructions' },
-    { name: 'navigate_to_page' },
-  ]);
-  assert.equal(r.pass, true);
-  assert.equal(r.count, 3);
-});
-test('toolBudget: a real spiral still fails after KB-search dedupe', () => {
-  const r = probeToolBudget('here', [
-    { name: 'search_knowledge_base' },
-    { name: 'async_search_knowledge_base' },
-    { name: 'navigate_to_page' },
-    { name: 'highlight_element' },
-    { name: 'get_experience_instructions' },
-  ]);
-  assert.equal(r.pass, false);
-  assert.equal(r.count, 4);
-});
-
 /* completeness */
 test('completeness: skipped when expectation says so', () => {
   assert.equal(probeCompleteness({ skipCompleteness: true }, ''), null);
@@ -126,10 +94,26 @@ test('singleToolCallPerTurn: navigate_to_page called twice fails even with diffe
   ]);
   assert.equal(r.pass, false);
 });
-test('singleToolCallPerTurn: a non-nav tool retried once with a DIFFERENT argument passes (deliberate anti-loop retry, not a bug)', () => {
+test('singleToolCallPerTurn: highlight_element called twice fails even with different targets (both are one-call tools per provision.mjs)', () => {
   const r = probeSingleToolCallPerTurn([
     { name: 'highlight_element', args: { target: 'code-example' } },
     { name: 'highlight_element', args: { target: 'code-block' } },
+  ]);
+  assert.equal(r.pass, false);
+});
+test('singleToolCallPerTurn: a non-nav, non-highlight tool retried once with a DIFFERENT argument passes (deliberate anti-loop retry, not a bug)', () => {
+  const r = probeSingleToolCallPerTurn([
+    { name: 'get_experience_instructions', args: { name: 'siteMap' } },
+    { name: 'get_experience_instructions', args: { name: 'obeyRules' } },
+  ]);
+  assert.equal(r.pass, true);
+});
+test('singleToolCallPerTurn: several genuinely different tools each firing once in one turn all pass (multi-tool turns are welcome, not a spiral)', () => {
+  const r = probeSingleToolCallPerTurn([
+    { name: 'async_search_knowledge_base' },
+    { name: 'get_experience_instructions' },
+    { name: 'navigate_to_page' },
+    { name: 'highlight_element' },
   ]);
   assert.equal(r.pass, true);
 });
@@ -435,10 +419,11 @@ test('scoreTurn: a false highlight claim is release-blocking even though the too
   assert.ok(!scored.failed.includes('tools'));
 });
 
-/* noFalseHighlightClaim / probeHighlightSuccessNarration — the acks-aware flip side, exercised
- * via simulateHighlightSuccess since a headless run otherwise never sees a real ok:true ack */
+/* noFalseHighlightClaim — the acks-aware flip side, exercised via simulateHighlightSuccess since
+ * a headless run otherwise never sees a real ok:true ack. Whether the reply also narrates the
+ * success in words is not checked — only that the tool fired when merited, per the user's own
+ * framing: "it's enough that the model used the tool." */
 const okAck = [{ name: 'highlight_element', response: { ok: true, id: 'code-example', label: 'that example' } }];
-const notFoundAck = [{ name: 'highlight_element', response: { ok: false, error: 'not_found' } }];
 
 test('noFalseHighlightClaim: a claim backed by a genuine success ack is not a false claim (null, not applicable)', () => {
   const r = probeNoFalseHighlightClaim(
@@ -449,75 +434,15 @@ test('noFalseHighlightClaim: a claim backed by a genuine success ack is not a fa
   assert.equal(r, null);
 });
 
-test('probeHighlightSuccessNarration: not applicable when no highlight ack succeeded', () => {
-  assert.equal(probeHighlightSuccessNarration([{ name: 'highlight_element' }], 'anything', notFoundAck), null);
-  assert.equal(probeHighlightSuccessNarration([], 'anything', undefined), null);
-});
-
-test('probeHighlightSuccessNarration: narrating the highlight after a real success ack passes', () => {
-  const r = probeHighlightSuccessNarration(
-    [{ name: 'highlight_element' }],
-    "I've highlighted that example for you right here on the page.",
-    okAck,
-  );
-  assert.equal(r.pass, true);
-});
-
-test('probeHighlightSuccessNarration: staying silent about a real success fails', () => {
-  const r = probeHighlightSuccessNarration([{ name: 'highlight_element' }], 'Here is some unrelated text.', okAck);
-  assert.equal(r.pass, false);
-});
-
-test('probeHighlightSuccessNarration: an adverb between subject and verb ("I\'ve just highlighted...") still counts as a claim (live-observed phrasing)', () => {
-  const r = probeHighlightSuccessNarration(
-    [{ name: 'highlight_element' }],
-    "I've just highlighted the code example for you right here on the page.",
-    okAck,
-  );
-  assert.equal(r.pass, true);
-  assert.equal(r.claimed, true);
-});
-
-test('probeHighlightSuccessNarration: a compound predicate ("I\'ve navigated us to X and highlighted Y") still counts as a claim (live-observed phrasing)', () => {
-  const r = probeHighlightSuccessNarration(
-    [{ name: 'highlight_element' }],
-    "I've navigated us to the Getting Started page and highlighted the quick-start browser code example for you.",
-    okAck,
-  );
-  assert.equal(r.pass, true);
-  assert.equal(r.claimed, true);
-});
-
-test('probeHighlightSuccessNarration: "pointed out" (not just "pointed to/at") still counts as a claim (live-observed phrasing)', () => {
-  const r = probeHighlightSuccessNarration(
-    [{ name: 'highlight_element' }],
-    "I've pointed out the quick-start browser code example for you on the Getting Started page.",
-    okAck,
-  );
-  assert.equal(r.pass, true);
-  assert.equal(r.claimed, true);
-});
-
-test('probeHighlightSuccessNarration: "pointed it out" (object pronoun between verb and "out") still counts as a claim (live-observed phrasing)', () => {
-  const r = probeHighlightSuccessNarration(
-    [{ name: 'highlight_element' }],
-    "I've pointed it out for you right there on the page.",
-    okAck,
-  );
-  assert.equal(r.pass, true);
-  assert.equal(r.claimed, true);
-});
-
-test('scoreTurn: a genuine highlight success with correct narration is healthy and dimension-scored', () => {
+test('scoreTurn: a genuine highlight success, narrated or not, is healthy and not dinged for silence', () => {
   const turn = {
     expectation: {},
     latencyMs: 1000,
-    text: "I've highlighted that example for you right here on the page.",
+    text: 'Here is some unrelated text with no mention of the highlight at all.',
     toolCalls: [{ name: 'highlight_element', args: { target: 'code-example' } }],
     acks: okAck,
   };
   const scored = scoreTurn(turn, siteData);
-  assert.equal(scored.results.highlightSuccessNarration.pass, true);
   assert.equal(scored.results.noFalseHighlightClaim, null);
   assert.equal(scored.healthy, true);
 });

@@ -316,8 +316,7 @@ export function buildPersonas(siteData) {
         },
         {
           // Mirrors highlight-success: the simulated ok:true ack only takes effect IF she calls
-          // highlight_element, so noFalseHighlightClaim/highlightSuccessNarration probe whichever
-          // branch actually happened.
+          // highlight_element, so noFalseHighlightClaim probes whichever branch actually happened.
           prompt: 'Can you point at the part that shows what runs where?',
           simulateHighlightSuccess: threeFlowsTarget.id,
           simulateHighlightLabel: threeFlowsTarget.label,
