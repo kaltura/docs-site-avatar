@@ -22,12 +22,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
 
       - name: Check out the docs site (gh-pages-src)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: kaltura/intelligent-agents-sdk
           ref: gh-pages-src
