@@ -121,8 +121,8 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Which exact version tag does the quick-start on the home page pin the jsDelivr import to?',
           capabilities: { use_knowledge_base: 'on' },
-          // Voice-styled answers verbalize version numbers ("one point eight point zero").
-          relevanceAny: ['1.8.0', 'one point eight'],
+          // Voice-styled answers verbalize version numbers ("one point ten point zero").
+          relevanceAny: ['1.10.0', 'one point ten', 'one point one zero'],
         },
         {
           prompt: 'What methods does the intellect secrets API expose, and is deleting a secret reversible?',
@@ -137,7 +137,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'How long does the SDK wait for the joinComplete socket event compared to clientConfiguration?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['20s', '20 second', 'twenty'],
+          relevanceAny: ['20s', '20 second', '20-second', 'twenty'],
         },
         {
           prompt: 'Is the graded-question GenUI widget emitted by the server like the other widgets?',
