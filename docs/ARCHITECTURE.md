@@ -24,7 +24,7 @@ RAG search over a freshly-uploaded, not-yet-indexed corpus can loop for 45-90+ s
 
 - `kaltura.knowledge.isIndexed(recordId, admin)` reads the knowledge record's own container status. That status reports ready the instant the record exists, not once its entries have indexed.
 - `knowledge.corpusStatus` doesn't help either — it only counts entries that exist, not whether they've finished embedding.
-- A real per-entry check (`kaltura.knowledge.entryStatus()`) is coming, with general rollout expected in early September 2026. It's not yet GA, so `provision()` doesn't rely on it.
+- A real per-entry check (`kaltura.knowledge.entryStatus()`) exists but is not yet generally available on every deployment — check with your Kaltura account team before building on it. `provision()` doesn't rely on it.
 
 Until then, `provision()` budgets a fixed best-effort wait (`INDEX_WAIT_MS`, 80s) *before* the intellect is ever created or updated, then writes `use_knowledge_base:'on'` into that same single add/update call — never a follow-up `setCapability()` patch.
 
