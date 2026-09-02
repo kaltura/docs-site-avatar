@@ -43,7 +43,7 @@ The command above puts the clone at the default location (`../intelligent-agents
 node server/provision.mjs
 ```
 
-This creates a brand-new intellect, avatar, agent, and knowledge base — every run without `--reuse` is a fresh set of live resources (see [docs/HOW-TO.md](HOW-TO.md) for updating an existing one in place instead). Expect it to take a little while: it uploads all 16 site pages into the knowledge base one at a time. You'll see a line per step, ending with:
+This creates a brand-new intellect, avatar, agent, and knowledge base — every run without `--reuse` is a fresh set of live resources (see [docs/HOW-TO.md](HOW-TO.md) for updating an existing one in place instead). Expect it to take a little while: it uploads all 25 site pages into the knowledge base one at a time. You'll see a line per step, ending with:
 
 ```
 ✅ provisioned. Wrote .../server/agent.json
@@ -64,10 +64,10 @@ This creates a brand-new intellect, avatar, agent, and knowledge base — every 
 node tests/eval/run.mjs
 ```
 
-This drives the real agent we just provisioned through every persona — a curious developer, a pricing-fisher, a prompt-injection attempt, a site tour through all 16 pages, and more — and scores every turn. You'll see one line per turn as it runs, then a summary:
+This drives the real agent we just provisioned through every persona — a curious developer, a pricing-fisher, a prompt-injection attempt, a site tour through all 25 pages, and more — and scores every turn. You'll see one line per turn as it runs, then a summary:
 
 ```
-✅ 60 turns · overall 99% · 0 release-blocking failures · 0 errored/timed-out turns · 16/16 routes exercised
+✅ 60 turns · overall 99% · 0 release-blocking failures · 0 errored/timed-out turns · 25/25 routes exercised
    wrote tests/eval/artifacts/{transcript,report}.json + report.md + history snapshot
 ```
 
