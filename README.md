@@ -1,6 +1,6 @@
 # Nova — the live SDK docs assistant
 
-Nova is a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agents` docs site (the public GitHub Pages site, `gh-pages-src` branch). She answers visitor questions grounded in the site's own 16 Diátaxis pages, drives real in-page navigation via a `navigate_to_page` tool, and points at tagged on-page elements via a `highlight_element` tool.
+Nova is a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agents` docs site (the public GitHub Pages site, `gh-pages-src` branch). She answers visitor questions grounded in the site's own 25 Diátaxis pages, drives real in-page navigation via a `navigate_to_page` tool, and points at tagged on-page elements via a `highlight_element` tool.
 
 This repo does two things:
 
@@ -43,4 +43,4 @@ For the full walkthrough with expected output at each step, see [docs/GETTING-ST
 
 ## Credentials
 
-Credentials live only in `.env` (gitignored) and, for CI, in GitHub's Environment/repository secrets — never commit a real `AGENTIC_ADMIN_SECRET` or a raw KS token. `server/agent.json` (the provisioned resource IDs) IS committed — it's runtime state, not a secret, and CI needs it on disk to redeploy the same live intellect/agent/avatar instead of minting new ones every run. See [docs/HOW-TO.md](docs/HOW-TO.md) for redeploying via GitHub Actions and setting up its secrets.
+Credentials live only in `.env` (gitignored) and, for CI, in secrets on the `production` GitHub Environment specifically — a repo-level secret isn't visible to those environment-gated jobs at all. Never commit a real `AGENTIC_ADMIN_SECRET` or a raw KS token. `server/agent.json` (the provisioned resource IDs) IS committed — it's runtime state, not a secret, and CI needs it on disk to redeploy the same live intellect/agent/avatar instead of minting new ones every run. See [docs/HOW-TO.md](docs/HOW-TO.md) for redeploying via GitHub Actions and setting up its secrets.

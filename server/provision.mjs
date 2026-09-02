@@ -299,7 +299,7 @@ const KEY_FACTS = `
 - Package: @kaltura/intelligent-agents — a zero-runtime-dependency JavaScript SDK (ESM + JSDoc) for building and operating Kaltura Agentic Avatars.
 - Two entry points: ./management (provision/configure/measure agents, server-side) and ./experience (the live socket+WHEP runtime, browser).
 - Optional plugin subpaths that don't bloat the base runtime: ./experience/presenter (deck-walkthrough), ./experience/genui (widget rendering), ./experience/analytics (KAVA events), ./experience/noise-suppressor (AudioWorklet noise gate).
-- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.10.0 (.../gh/kaltura/intelligent-agents-sdk@v1.10.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
+- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.11.0 (.../gh/kaltura/intelligent-agents-sdk@v1.11.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
 - Conversations run over two interchangeable transports: KalturaAvatarSession (live avatar video over WebRTC + socket) and KalturaChatSession (text-only over HTTP streaming — no camera, mic, or WebRTC at all). KalturaAgentSession wraps both and can switch mid-conversation with switchMode(), keeping the same thread, memory, tools, and request variables — the modeChanged event reports threadContinuity: true when the conversation carried over.
 - Client-supplied request_vars sent WITH a converse message are gated: the intellect must have allow_client_variables set to true (toggle via intellects.setClientVariablesEnabled). With the gate off the turn fails SILENTLY as an empty reply — no error reaches the wire on either transport, because the server rejects after the response stream has opened. Both experience session classes emit a once-per-session warning event (code empty_turn_with_request_vars, naming the offending keys); the management SDK's converse helpers surface a typed client_variables_disabled error only in the pre-stream case. Reserved sys__ variables (like sys__user_id) are server-injected every turn and rejected if a client tries to set them, regardless of that gate.
 - License: MIT. No Kaltura account is needed to read, fork, or build on the source; a Kaltura account with the Agentic Avatar feature enabled is needed to call the live APIs it wraps.
@@ -707,7 +707,11 @@ async function wireKnowledge(admin, docs) {
  */
 async function deleteKnowledge(admin, { knowledgeRecordId, knowledgeCategoryId, knowledgeEntryIds } = {}) {
   if (knowledgeRecordId) {
-    await kaltura.knowledge.deleteRecord(knowledgeRecordId, admin, { confirmPermanent: true }).catch((e) => console.error('knowledge-record', e.code));
+    // force:true: the outgoing record is still referenced by the intellect being updated at the
+    // exact point this runs (the update call that repoints it to the new record goes out later
+    // in this same run — see provision()), so the SDK's default in-use guard would otherwise
+    // throw knowledge_in_use on every --reuse redeploy.
+    await kaltura.knowledge.deleteRecord(knowledgeRecordId, admin, { confirmPermanent: true, force: true }).catch((e) => console.error('knowledge-record', e.code));
   }
   if (knowledgeCategoryId) {
     const calls = (knowledgeEntryIds || []).map((entryId) => ({ service: 'baseentry', action: 'delete', entryId }));

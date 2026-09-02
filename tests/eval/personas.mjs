@@ -3,7 +3,7 @@
  * earnings-avatar-q2's tests/eval/personas.mjs, adapted for a text-and-navigation agent with
  * no slide deck. Route/highlight-target coverage is DATA-DRIVEN off the live site checkout
  * (see site-data.mjs) rather than hand-listed here, so it can never silently drift out of
- * sync with the real 16-route nav — {@link buildPersonas} takes the loaded `siteData` and
+ * sync with the real 25-route nav — {@link buildPersonas} takes the loaded `siteData` and
  * builds one navigate_to_page turn per real route.
  */
 export const KICKOFF_TRIGGER = 'hi, start session!';
