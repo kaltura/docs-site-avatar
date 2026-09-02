@@ -425,7 +425,7 @@ async function provision() {
   if (knowledgeUnchanged) {
     ({ knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds } = prevSaved);
     indexed = true;
-    console.log(`✓ docs unchanged since last deploy (hash ${docsHash.slice(0, 12)}…) — reusing knowledge category ${knowledgeCategoryId}/record ${knowledgeRecordId}, skipping teardown/re-upload/${INDEX_WAIT_MS / 1000}s indexing wait`);
+    console.log(`✓ docs unchanged since last deploy (hash ${docsHash.slice(0, 12)}…) — reusing knowledge category ${knowledgeCategoryId}/record ${knowledgeRecordId}, skipping teardown/re-upload/indexing poll`);
   } else {
     if (reusingSameIntellect) {
       console.log('✓ removing previous knowledge corpus before re-upload (avoids orphaning it)');
@@ -448,16 +448,11 @@ async function provision() {
     // status ('READY'/'DELETED') — it reads READY the instant the record exists, before any
     // of the entries just uploaded have actually finished indexing, so polling it here never
     // tells us anything more on a later attempt than it did on the first. The real per-entry
-    // signal (kaltura.knowledge.entryStatus(), POST /v1/knowledge/entry_status) isn't GA in
-    // production yet (general rollout expected early September 2026) and per Kaltura shouldn't
-    // be relied on until then. Until it lands, budget a fixed best-effort wait instead —
-    // matches the same pattern documented in the SDK's own docs/api/build.md.
-    console.log(`… waiting ${INDEX_WAIT_MS / 1000}s (best-effort — not a real completion check, see comment above) for knowledge record ${knowledgeRecordId} to finish indexing before enabling RAG`);
-    await sleep(INDEX_WAIT_MS);
-    // TODO: once kaltura.knowledge.entryStatus() is GA (~Sept 2026), replace this fixed wait
-    // with a real poll: kaltura.knowledge.entryStatus(knowledgeRecordId, knowledgeEntryIds, admin)
-    // until every entry's documents report a non-null status.
-    indexed = true;
+    // signal, kaltura.knowledge.entryStatus(), is the correct, officially supported completion
+    // check — confirmed live in production. It returns an empty `entries` array until an entry
+    // finishes indexing, then a per-document `status` (observed: 'SUCCEEDED').
+    console.log(`… polling knowledge record ${knowledgeRecordId} for indexing completion (up to ${INDEX_WAIT_MS / 1000}s)`);
+    indexed = await pollEntryStatus(admin, knowledgeRecordId, knowledgeEntryIds, INDEX_WAIT_MS);
   }
 
   const siteMap = buildSiteMap(docs);
@@ -649,10 +644,33 @@ async function provision() {
   console.log(JSON.stringify(out, null, 2));
   console.log(knowledgeUnchanged
     ? `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, reused as-is (docs unchanged, no re-upload/wait needed).`
-    : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after an ${INDEX_WAIT_MS / 1000}s best-effort wait (no real completion signal yet — see the comment above the wait).`);
+    : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after polling kaltura.knowledge.entryStatus() for indexing completion (budget ${INDEX_WAIT_MS / 1000}s).`);
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+const ENTRY_STATUS_POLL_INTERVAL_MS = 5000;
+
+/** Poll kaltura.knowledge.entryStatus() until every entry reports a per-document status, or
+ * budgetMs runs out. Always resolves `true` (use_knowledge_base stays 'on' either way) — a slow
+ * indexer shouldn't disable RAG outright, it should just get logged as a heads-up. */
+async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budgetMs) {
+  const deadline = Date.now() + budgetMs;
+  const pending = new Set(entryIds);
+  while (pending.size && Date.now() < deadline) {
+    const { entries } = await kaltura.knowledge.entryStatus(knowledgeRecordId, [...pending], admin);
+    for (const entry of entries) {
+      if (entry.documents?.every((d) => d.status)) pending.delete(entry.entry_id);
+    }
+    if (pending.size) {
+      console.log(`  … ${pending.size}/${entryIds.length} entries still indexing`);
+      await sleep(Math.min(ENTRY_STATUS_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())));
+    }
+  }
+  if (pending.size) console.log(`⚠ ${pending.size}/${entryIds.length} entries not confirmed indexed after ${budgetMs / 1000}s — enabling RAG anyway`);
+  else console.log('✓ all entries confirmed indexed');
+  return true;
+}
 
 /**
  * Wire the Knowledge base (RAG) — Path A (ungated, see the project's design
