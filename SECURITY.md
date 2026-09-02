@@ -34,8 +34,10 @@ and coordinate disclosure before any public write-up.
 ## What this repo does and doesn't handle for you
 
 - Credentials (`AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET`) live only in a
-  gitignored `.env` locally, or in GitHub Environment/repository secrets in
-  CI — never commit a real admin secret or a raw KS token.
+  gitignored `.env` locally, or in secrets on the `production` GitHub
+  Environment specifically in CI — a repo-level secret isn't visible to those
+  environment-gated jobs at all. Never commit a real admin secret or a raw KS
+  token.
 - `redeploy.yml` is gated behind a GitHub Environment named `production`
   with required reviewers, so a human approves before the job can read
   `AGENTIC_ADMIN_SECRET` and reshape the live agent. `eval.yml` only reads
