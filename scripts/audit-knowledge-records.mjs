@@ -56,7 +56,7 @@ async function main() {
   const admin = await kaltura.sessions.createAdminToken();
   console.log('✓ admin token');
 
-  const all = await kaltura.knowledge.listRecords(admin, { pageSize: 50 }).all();
+  const all = await kaltura.knowledge.list(admin, { pageSize: 50 }).all();
   const candidates = all.filter((r) => isCandidate(r, activeId));
   console.log(`✓ ${all.length} total record(s) on this partner, ${candidates.length} candidate(s) (named "${RECORD_NAME}" or unnamed, excluding the active record ${activeId})`);
 
