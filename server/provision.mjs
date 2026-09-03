@@ -294,12 +294,17 @@ export function buildSiteMap(docs) {
 
 /** Small, ALWAYS-in-prompt facts about the SDK itself — defense-in-depth for the
  * questions every visitor asks first, so they never depend on RAG retrieval
- * quality (same rationale as earnings-avatar-q2's quarterlyFigures block). */
+ * quality (same rationale as earnings-avatar-q2's quarterlyFigures block).
+ * The quick-start pin below is a 4th SDK-version-pin location, alongside
+ * intelligent-agents-sdk-site/src/assets/nova/connect.js (SDK_TAG),
+ * intelligent-agents-sdk-site/src/index.md (quick-start jsDelivr pin), and
+ * this repo's scripts/fetch-sdk.mjs (DEFAULT_TAG) — check-sdk-pin-sync.mjs
+ * only covers the site repo's two, so bump this one by hand on every release. */
 const KEY_FACTS = `
 - Package: @kaltura/intelligent-agents — a zero-runtime-dependency JavaScript SDK (ESM + JSDoc) for building and operating Kaltura Agentic Avatars.
 - Two entry points: ./management (provision/configure/measure agents, server-side) and ./experience (the live socket+WHEP runtime, browser).
 - Optional plugin subpaths that don't bloat the base runtime: ./experience/presenter (deck-walkthrough), ./experience/genui (widget rendering), ./experience/analytics (KAVA events), ./experience/noise-suppressor (AudioWorklet noise gate).
-- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.11.0 (.../gh/kaltura/intelligent-agents-sdk@v1.11.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
+- Distribution: this repo is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.14.0 (.../gh/kaltura/intelligent-agents-sdk@v1.14.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
 - Conversations run over two interchangeable transports: KalturaAvatarSession (live avatar video over WebRTC + socket) and KalturaChatSession (text-only over HTTP streaming — no camera, mic, or WebRTC at all). KalturaAgentSession wraps both and can switch mid-conversation with switchMode(), keeping the same thread, memory, tools, and request variables — the modeChanged event reports threadContinuity: true when the conversation carried over.
 - Client-supplied request_vars sent WITH a converse message are gated: the intellect must have allow_client_variables set to true (toggle via intellects.setClientVariablesEnabled). With the gate off the turn fails SILENTLY as an empty reply — no error reaches the wire on either transport, because the server rejects after the response stream has opened. Both experience session classes emit a once-per-session warning event (code empty_turn_with_request_vars, naming the offending keys); the management SDK's converse helpers surface a typed client_variables_disabled error only in the pre-stream case. Reserved sys__ variables (like sys__user_id) are server-injected every turn and rejected if a client tries to set them, regardless of that gate.
 - License: MIT. No Kaltura account is needed to read, fork, or build on the source; a Kaltura account with the Agentic Avatar feature enabled is needed to call the live APIs it wraps.
@@ -309,6 +314,9 @@ const KEY_FACTS = `
 - Scripted avatar sessions render speech the caller authors; they don't include turn-taking, interruption handling, model sync, knowledge grounding, tool orchestration, or conversation analytics — the full agentic session does.
 - Thread transcripts: the management SDK DOES provide a direct fetch for a past thread's full transcript — mgmt.threads.transcript() (REST: POST /v1/thread/get_transcripts with the thread id, admin KS). It returns plain text, one turn per line, each line prefixed "human:" or "ai:" — not JSON message objects. Documented on the API · Phase 4 — Operate reference page.
 - GenUI ExperienceRenderer: its maxRendered option caps the rendered-widget history at 100 by default; when the cap is exceeded the oldest descriptor is dropped. Documented on the GenUI Reference page.
+- Knowledge: an intellect's knowledge_ids field is capped at ONE record despite its plural array shape — the Genie validator (at_most_one_knowledge_id) rejects more, and the SDK's intellectConfig.setKnowledgeIds() enforces this client-side before any network call. To ground one agent in several content sources, upload them all into that single knowledge record instead of trying to attach several records.
+- Intellect secrets: the management SDK's mgmt.intellects.secrets exposes listNames, has, set, delete, replaceAll, and validate. delete(configId, name, ks, confirm) is permanent and requires confirm = { confirmPermanent: true }.
+- Connection handshake timing: the SDK waits 5s for the clientConfiguration socket event but 20s for joinComplete (both counted as JoinRoomTimeout) — joinComplete gets the longer budget because the server only emits it after an awaited context-update call that can exceed 5s under load.
 - You, Nova, are yourself a live example of what this SDK builds: provisioned via the SDK's own Management API, grounded on this site's own docs through the SDK's Knowledge feature, and running on the SDK's own Experience runtime.
 `.trim();
 
