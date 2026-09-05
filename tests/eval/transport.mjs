@@ -21,7 +21,7 @@ const SPOKEN_TYPES = new Set(['text', 'avatar', 'avatar-filler']);
 // of the same call) and, past a hard limit, abandons the stuck turn and resends the visitor's
 // message once more prefixed with SPIRAL_RECOVERY_PREFIX. This headless transport bypasses
 // KalturaAvatarSession entirely (no socket, no cold-reconnect), so without an equivalent it has
-// NONE of that protection — confirmed live: withholding the ACK (mirroring session.js's
+// NONE of that protection: withholding the ACK (mirroring session.js's
 // dedup-drop) did not stop the brain from re-emitting the identical call every ~1-7s for 120s+
 // with no sign of stopping on its own. A smaller limit than the SDK's default (30) is used here
 // deliberately — this is a batch-eval budget, not a live conversation, so the goal is "clearly

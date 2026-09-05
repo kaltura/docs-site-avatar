@@ -1,6 +1,5 @@
 /**
- * Pure scoring functions for the Nova eval — the direct structural peer of
- * earnings-avatar-q2's tests/eval/probes.mjs, adapted for a text-and-navigation agent (no
+ * Pure scoring functions for the Nova eval, built for a text-and-navigation agent (no
  * slide deck, no financial-figure grounding) with its own restricted-topic/prompt-leak/
  * invented-URL/invented-path probes specific to a public SDK-docs assistant.
  */

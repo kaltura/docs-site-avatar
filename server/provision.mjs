@@ -16,8 +16,7 @@
  * tools are `waitForResponse:true` — a found/not-found ack is what lets her
  * tell the truth about whether she actually navigated or pointed at
  * something, rather than a prompt-only promise she might not keep. Both
- * tools are idempotently upserted by name (see upsertClientTool below),
- * mirroring earnings-avatar-q2's upsertToolFromList pattern. A `--reuse` run
+ * tools are idempotently upserted by name (see upsertClientTool below). A `--reuse` run
  * deletes the PREVIOUS knowledge category/record/entries (see deleteKnowledge)
  * before wireKnowledge mints a new one, so repeated redeploys (e.g. from CI)
  * don't orphan a fresh corpus on every run — UNLESS the site's docs hash
@@ -58,10 +57,8 @@ const DISPLAY_NAME = 'Nova — SDK Docs Assistant';
 // kaltura/intelligent-agents-sdk repo's `gh-pages-src` branch) — given to the
 // brain as the ONLY base it may cite/link against; never invented per-page.
 const BASE_URL = 'https://kaltura.github.io/intelligent-agents-sdk';
-// Catalog-verified, deliberately chosen persona (see the project's design notes):
-// a custom-visual "AI trainer" face already in this shared test account (not the
-// earnings-avatar-q2 CEO clone, not the unlabeled leftover test artifact) paired
-// with the curated, human-described "Yasmin" voice tier ("Friendly, Warm and Clear").
+// Deliberately chosen persona: a custom-visual "AI trainer" face already in this
+// account, paired with the curated "Yasmin" voice tier ("Friendly, Warm and Clear").
 const DEFAULT_VISUAL_ID = '852e1c51-c48e-4fbb-b800-4222edd8642b';
 const DEFAULT_VOICE_ID = '625jGFaa0zTLtQfxwc6Q';
 // Single source of truth for the declared persona name — feeds both the
@@ -294,7 +291,7 @@ export function buildSiteMap(docs) {
 
 /** Small, ALWAYS-in-prompt facts about the SDK itself — defense-in-depth for the
  * questions every visitor asks first, so they never depend on RAG retrieval
- * quality (same rationale as earnings-avatar-q2's quarterlyFigures block).
+ * quality.
  * The quick-start pin below is a 4th SDK-version-pin location, alongside
  * intelligent-agents-sdk-site/src/assets/nova/connect.js (SDK_TAG),
  * intelligent-agents-sdk-site/src/index.md (quick-start jsDelivr pin), and
@@ -314,7 +311,7 @@ const KEY_FACTS = `
 - Scripted avatar sessions render speech the caller authors; they don't include turn-taking, interruption handling, model sync, knowledge grounding, tool orchestration, or conversation analytics — the full agentic session does.
 - Thread transcripts: the management SDK DOES provide a direct fetch for a past thread's full transcript — mgmt.threads.transcript() (REST: POST /v1/thread/get_transcripts with the thread id, admin KS). It returns plain text, one turn per line, each line prefixed "human:" or "ai:" — not JSON message objects. Documented on the API · Phase 4 — Operate reference page.
 - GenUI ExperienceRenderer: its maxRendered option caps the rendered-widget history at 100 by default; when the cap is exceeded the oldest descriptor is dropped. Documented on the GenUI Reference page.
-- Knowledge: an intellect's knowledge_ids field is capped at ONE record despite its plural array shape — the Genie validator (at_most_one_knowledge_id) rejects more, and the SDK's intellectConfig.setKnowledgeIds() enforces this client-side before any network call. To ground one agent in several content sources, upload them all into that single knowledge record instead of trying to attach several records.
+- Knowledge: an intellect's knowledge_ids field is capped at ONE record despite its plural array shape — the server rejects more, and the SDK's intellectConfig.setKnowledgeIds() enforces this client-side before any network call. To ground one agent in several content sources, upload them all into that single knowledge record instead of trying to attach several records.
 - Intellect secrets: the management SDK's mgmt.intellects.secrets exposes listNames, has, set, delete, replaceAll, and validate. delete(configId, name, ks, confirm) is permanent and requires confirm = { confirmPermanent: true }.
 - Connection handshake timing: the SDK waits 5s for the clientConfiguration socket event but 20s for joinComplete (both counted as JoinRoomTimeout) — joinComplete gets the longer budget because the server only emits it after an awaited context-update call that can exceed 5s under load.
 - You, Nova, are yourself a live example of what this SDK builds: provisioned via the SDK's own Management API, grounded on this site's own docs through the SDK's Knowledge feature, and running on the SDK's own Experience runtime.
@@ -349,8 +346,7 @@ export function checkCustomPromptSchema(remoteKeys, requiredKeys = REQUIRED_CUST
  * Idempotently create-or-update a client tool by name (Tools are a
  * PARTNER-LEVEL entity with their own name-keyed lookup — see
  * sdk/src/management/tools.js). Guards against clobbering a tool another
- * intellect still depends on, mirroring earnings-avatar-q2's
- * upsertToolFromList pattern exactly.
+ * intellect still depends on.
  */
 async function upsertClientTool(admin, toolConfig, existingTools, selfConfigId) {
   const existing = existingTools.find((t) => t.name === toolConfig.name);
@@ -444,7 +440,7 @@ async function provision() {
     // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
     // send it in that single add/update call alongside knowledge_ids — never as a follow-up
     // setCapability patch. This SDK's own docs (CLIENT-COMMANDS.md "Gotcha 2") say partner config
-    // is Redis-cached ~24h server-side and a capability flip on an EXISTING intellect won't reach
+    // is cached ~24h server-side and a capability flip on an EXISTING intellect won't reach
     // converse time until that cache expires; a two-step create/update-then-setCapability sequence
     // additionally risks the cache latching onto the transient 'off' value written in step one
     // instead of ever seeing step two's 'on'. Polling first and writing once removes that race for
@@ -457,7 +453,7 @@ async function provision() {
     // of the entries just uploaded have actually finished indexing, so polling it here never
     // tells us anything more on a later attempt than it did on the first. The real per-entry
     // signal, kaltura.knowledge.entryStatus(), is the correct, officially supported completion
-    // check — confirmed live in production. It returns an empty `entries` array until an entry
+    // check. It returns an empty `entries` array until an entry
     // finishes indexing, then a per-document `status` (observed: 'SUCCEEDED').
     console.log(`… polling knowledge record ${knowledgeRecordId} for indexing completion (up to ${INDEX_WAIT_MS / 1000}s)`);
     indexed = await pollEntryStatus(admin, knowledgeRecordId, knowledgeEntryIds, INDEX_WAIT_MS);
@@ -538,11 +534,10 @@ async function provision() {
     capabilities: {
       avatar: 'on',
       avatar_filler: 'off',
-      // Resolved above, before this intellect is created/updated, after the
-      // fixed best-effort indexing wait — see the comment above that wait for
-      // why there's no real completion signal to check yet, and why this is
-      // set here, in the same write, rather than via a follow-up setCapability
-      // call.
+      // Resolved above, before this intellect is created/updated, by polling
+      // kaltura.knowledge.entryStatus() for indexing completion — see the
+      // comment above that poll for why this is set here, in the same write,
+      // rather than via a follow-up setCapability call.
       use_knowledge_base: indexed ? 'on' : 'off',
       use_content_search: 'disabled',
       use_get_entry_content: 'disabled',
@@ -602,9 +597,8 @@ async function provision() {
     avatar = await kaltura.avatars.create({
       voice: { id: DEFAULT_VOICE_ID, speed: 1.0 },
       visual: { id: DEFAULT_VISUAL_ID, motionControl: { speaking: 0.6, nonSpeaking: 0.2 } },
-      // OPENING_PHRASE ("<blank>") is an SSML silence tag, not an empty string
-      // — a falsy openingPhrase used to crash conversation-manager's
-      // AgentAdapter. The hero UI sends a synthetic kickoff message on
+      // OPENING_PHRASE ("<blank>") is an SSML silence tag, not an empty string.
+      // The backend does not accept a falsy openingPhrase. The hero UI sends a synthetic kickoff message on
       // connect instead (see obeyRules' KICKOFF_TRIGGER handling above).
       openingPhrase: OPENING_PHRASE,
     }, admin);

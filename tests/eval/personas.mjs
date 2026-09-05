@@ -1,7 +1,6 @@
 /**
- * Persona/turn dataset for the Nova (docs-site-avatar) eval — the direct structural peer of
- * earnings-avatar-q2's tests/eval/personas.mjs, adapted for a text-and-navigation agent with
- * no slide deck. Route/highlight-target coverage is DATA-DRIVEN off the live site checkout
+ * Persona/turn dataset for the Nova (docs-site-avatar) eval, built for a text-and-navigation
+ * agent with no slide deck. Route/highlight-target coverage is DATA-DRIVEN off the live site checkout
  * (see site-data.mjs) rather than hand-listed here, so it can never silently drift out of
  * sync with the real 25-route nav — {@link buildPersonas} takes the loaded `siteData` and
  * builds one navigate_to_page turn per real route.
@@ -496,7 +495,7 @@ export function buildPersonas(siteData) {
       // `session.setDynamicPrompt()` sugar (the exact call the site's highlighter.js makes),
       // landing as the `page_context` request variable on the turn. SOFT assertions only, on
       // purpose: request_vars require the intellect's allow_client_variables gate, and partner
-      // config is Redis-cached ~24h server-side — after a `--reuse` redeploy that flips the
+      // config is cached ~24h server-side — after a `--reuse` redeploy that flips the
       // gate on, turns can come back silently EMPTY (zero segments, no error, only a
       // `empty_turn_with_request_vars` warning in this turn's `warnings`) until the cache
       // expires. A hard/release-blocking assertion here would block CI on that propagation
