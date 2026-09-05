@@ -1,6 +1,5 @@
 /**
- * Nova eval dashboard — a zero-dependency node:http server (the direct structural peer of
- * earnings-avatar-q2/server/server.js) that drives the exact same engine.mjs/artifacts.mjs
+ * Nova eval dashboard — a zero-dependency node:http server that drives the exact same engine.mjs/artifacts.mjs
  * logic run.mjs uses, but streams live per-turn progress to a browser over SSE instead of
  * stdout, and exposes the latest report, the run history, the live persona inventory, and an
  * ad-hoc single-prompt tester, a `trials` query param on `/api/run/stream` for pass^k confidence

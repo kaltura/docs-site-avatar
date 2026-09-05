@@ -1,7 +1,7 @@
 /**
  * Nova (docs-site-avatar) evaluation runner — the single entry point for "test it like a real
  * visitor asking every plausible question, and prove the release-blocking correctness rules
- * hold." The direct structural peer of earnings-avatar-q2's tests/eval/run.mjs.
+ * hold."
  *
  * Drives the REAL provisioned brain (configId from server/agent.json) headlessly via the SDK's
  * `Conversations.stream()` — plus, for the chat-mode/transport-switch/page-context personas,
