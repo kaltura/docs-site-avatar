@@ -67,7 +67,7 @@ node tests/eval/run.mjs
 This drives the real agent we just provisioned through every persona — a curious developer, a pricing-fisher, a prompt-injection attempt, a site tour through every page, and more — and scores every turn. You'll see one line per turn as it runs, then a summary:
 
 ```
-✅ 60 turns · overall 99% · 0 release-blocking failures · 0 errored/timed-out turns · 25/25 routes exercised
+✅ 60 turns · overall 99% · 0 release-blocking failures · 0 errored/timed-out turns · 49/49 manifest pages exercised
    wrote tests/eval/artifacts/{transcript,report}.json + report.md + history snapshot
 ```
 

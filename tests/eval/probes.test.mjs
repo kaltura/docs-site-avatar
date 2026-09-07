@@ -314,6 +314,13 @@ test('noInventedPath: bare site baseUrl (absolute Home page) passes', () => {
   const r = probeNoInventedPath([{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/' } }], siteData);
   assert.equal(r.pass, true);
 });
+test('noInventedPath: a go_to with a missing, blank, or non-string path fails', () => {
+  for (const args of [{}, { path: '' }, { path: '   ' }, { path: 42 }, { path: null }]) {
+    const r = probeNoInventedPath([{ name: 'go_to', args }], siteData);
+    assert.equal(r.pass, false, JSON.stringify(args));
+    assert.equal(r.invented.length, 1);
+  }
+});
 test('noInventedPath: a fabricated absolute URL under the real baseUrl still fails', () => {
   const r = probeNoInventedPath([{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/pricing/' } }], siteData);
   assert.equal(r.pass, false);
@@ -370,6 +377,13 @@ test('noInventedApi: a denial followed by an explicit contradictory affirmation 
 /* section resolvable — go_to's section arg must resolve on the manifest page it targets */
 test('sectionResolvable: not applicable when no section was sent and none was expected', () => {
   assert.equal(probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/' } }], siteData), null);
+});
+test('sectionResolvable: a blank section is treated as no section, like the SiteNavigator does', () => {
+  for (const section of ['', '   ']) {
+    const calls = [{ name: 'go_to', args: { path: '/getting-started/', section } }];
+    assert.equal(probeSectionResolvable({}, calls, siteData), null);
+    assert.equal(probeSectionResolvable({ expectSection: 'install' }, calls, siteData).pass, false);
+  }
 });
 test('sectionResolvable: a section key that resolves on the targeted page passes', () => {
   const r = probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData);
