@@ -10,7 +10,7 @@ Update the prompt, tools, or knowledge of the agent you already provisioned, ins
 node server/provision.mjs --reuse <configId> --agent-id <agentId>
 ```
 
-Take `<configId>` and `<agentId>` from your existing `server/agent.json`. Add `--avatar-id <existingAvatarId>` to keep the current avatar too instead of creating a new one. `navigate_to_page` and `highlight_element` are upserted by name — if another intellect also references one of them, provision.mjs warns and reuses its id without overwriting its config, rather than changing a tool out from under that other intellect.
+Take `<configId>` and `<agentId>` from your existing `server/agent.json`. Add `--avatar-id <existingAvatarId>` to keep the current avatar too instead of creating a new one. `go_to` is upserted by name via `upsertClientTool()` — if another intellect also references it, provision.mjs warns and reuses its id without overwriting its config, rather than changing the tool out from under that other intellect.
 
 ## Redeploy Nova via GitHub Actions
 

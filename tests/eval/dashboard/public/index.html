@@ -59,17 +59,12 @@
   </section>
 
   <section id="tab-quick" class="tab-panel">
-    <p class="hint">Runs one turn against the live agent on a fresh thread, scored the same way the full suite scores every turn — for rapid iteration on prompt wording or probe behavior without a 44-turn run.</p>
+    <p class="hint">Runs one turn against the live agent on a fresh thread, scored the same way the full suite scores every turn — for rapid iteration on prompt wording or probe behavior without a full-suite run. Add <code>"transport":"chat"</code> to the expectation to run the turn through the SDK's chat session instead of the raw stream.</p>
     <div class="quick-form">
       <label for="quick-prompt">Prompt</label>
-      <textarea id="quick-prompt" rows="3" placeholder="Can you highlight the code example on this page for me?"></textarea>
-      <label for="quick-expectation">Expectation (optional JSON — e.g. {&quot;expectTools&quot;:[&quot;navigate_to_page&quot;],&quot;expectNavPath&quot;:&quot;/getting-started/&quot;})</label>
+      <textarea id="quick-prompt" rows="3" placeholder="Where do I read about push-to-talk?"></textarea>
+      <label for="quick-expectation">Expectation (optional JSON — e.g. {&quot;expectTools&quot;:[&quot;go_to&quot;],&quot;expectNavPath&quot;:&quot;/getting-started/&quot;,&quot;expectSection&quot;:&quot;step-set-up&quot;})</label>
       <textarea id="quick-expectation" rows="2" placeholder="{}"></textarea>
-      <label class="quick-checkbox-row" for="quick-simulate-highlight">
-        <input type="checkbox" id="quick-simulate-highlight" />
-        Simulate a real highlight_element success ack (exercises the success-narration probe)
-      </label>
-      <input id="quick-simulate-highlight-label" type="text" placeholder="Label the ack should carry, e.g. &quot;that code example&quot; (optional, defaults to &quot;that&quot;)" />
       <button id="btn-quick-run" class="btn btn-primary">Run Turn</button>
     </div>
     <div id="quick-result" class="quick-result"></div>

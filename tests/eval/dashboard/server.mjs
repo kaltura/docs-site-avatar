@@ -97,13 +97,9 @@ async function handleQuickTest(body) {
   const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : '';
   if (!prompt) return { error: { code: 'bad_request', detail: 'prompt (string) required.' } };
   const expectation = (body?.expectation && typeof body.expectation === 'object') ? body.expectation : {};
-  // Mirrors personas.mjs's simulateHighlightSuccess opt-in — lets the dashboard's Quick Test
-  // exercise the highlight-success narration path on an ad-hoc prompt too, not just fixed personas.
-  const highlightAck = body?.simulateHighlightSuccess
-    ? { ok: true, id: typeof body.simulateHighlightSuccess === 'string' ? body.simulateHighlightSuccess : 'simulated', label: body.simulateHighlightLabel || 'that' }
-    : undefined;
-  const r = await runTurn({ management, configId: agent.configId, message: prompt, threadId: null, routes: siteData.routes, highlightAck });
-  const rec = { prompt, expectation, latencyMs: r.latencyMs, text: r.text, toolCalls: r.toolCalls, acks: r.acks, error: r.error };
+  const transport = expectation.transport === 'chat' ? 'chat' : 'stream';
+  const r = await runTurn({ management, configId: agent.configId, message: prompt, threadId: null, transport, pageContext: expectation.pageContext });
+  const rec = { prompt, expectation, latencyMs: r.latencyMs, text: r.text, toolCalls: r.toolCalls, error: r.error, transport: r.transport, warnings: r.warnings };
   return { ...rec, scored: scoreTurn(rec, siteData) };
 }
 
@@ -160,7 +156,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/personas') {
       return sendJson(res, 200, {
         personas: PERSONAS.map((p) => ({ id: p.id, persona: p.persona, category: p.category, turns: p.turns })),
-        siteData: { siteDir: siteData.siteDir, baseUrl: siteData.baseUrl, routes: siteData.routes, highlightTargets: siteData.highlightTargets },
+        siteData: { siteDir: siteData.siteDir, baseUrl: siteData.baseUrl, routes: siteData.routes, manifest: siteData.manifest },
       });
     }
     if (req.method === 'POST' && url.pathname === '/api/quick-test') return sendJson(res, 200, await handleQuickTest(await readJson(req)));

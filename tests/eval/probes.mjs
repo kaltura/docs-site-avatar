@@ -2,7 +2,13 @@
  * Pure scoring functions for the Nova eval, built for a text-and-navigation agent (no
  * slide deck, no financial-figure grounding) with its own restricted-topic/prompt-leak/
  * invented-URL/invented-path probes specific to a public SDK-docs assistant.
+ *
+ * Navigation probes resolve `go_to` arguments through the SDK's own `resolvePath` /
+ * `resolveSection` against the published sections manifest, so the eval judges a call exactly
+ * the way the browser-side SiteNavigator would act on it.
  */
+import { normalizePath, resolvePath, resolveSection } from '../../vendor/sdk/src/core/site-keys.js';
+
 const LATENCY_TIERS = { snappy: 4000, ok: 6000, slow: 9000 };
 
 const EXTERNAL_ALLOWLIST = [
@@ -17,6 +23,7 @@ const PROMPT_LEAK_TERMS = [
   'restrictedtopics',
   'obeyrules',
   'sitemap',
+  'navrules',
   'keyfacts',
   'replyformat',
   'base_directive',
@@ -143,11 +150,10 @@ export function probeRelevance(expectation, text) {
   return { pass: hit, keywords: expectation.relevanceAny };
 }
 
-// navigate_to_page and highlight_element are both one-call tools per provision.mjs's own
-// obeyRules ("both one-call tools: call each at most once per turn... treat that single call —
-// whatever it reports back — as the complete action for the turn"): more than one call to either
-// in a single turn is a stuck-loop/spiral signal regardless of whether the arguments differ.
-const STRICT_ONE_CALL_TOOLS = new Set(['navigate_to_page', 'highlight_element']);
+// go_to is a one-call tool per the SDK's SITE_NAV_RULES_PROMPT ("at most once per reply"), and
+// the browser-side SiteNavigator drops any second call in the same turn anyway: more than one
+// call in a single turn is a stuck-loop/spiral signal regardless of whether the arguments differ.
+const STRICT_ONE_CALL_TOOLS = new Set(['go_to']);
 
 /**
  * This is the harness's single spiral detector: any tool genuinely relevant to the turn is
@@ -225,121 +231,94 @@ function extractUrls(text) {
   return [...(text || '').matchAll(/https?:\/\/[^\s)"'>]+/g)].map((m) => m[0]);
 }
 
+/** Every page path the site really has: nav.js routes plus the sections manifest, normalized. */
+function realPagePaths(siteData) {
+  const paths = new Set();
+  for (const r of siteData?.routes || []) paths.add(sitePath(r.url));
+  for (const p of siteData?.manifest?.pages || []) paths.add(sitePath(p.path));
+  return paths;
+}
+
 export function probeNoInventedUrl(text, siteData) {
   const urls = extractUrls(text);
   if (urls.length === 0) return { pass: true, checked: [] };
-  const realUrls = new Set(siteData.routes.map((r) => `${siteData.baseUrl}${r.url}`));
+  const real = realPagePaths(siteData);
   const invented = urls.filter((u) => {
-    if (realUrls.has(u) || realUrls.has(u.replace(/\/$/, ''))) return false;
+    const path = sitePath(u.split(/[?#]/)[0], siteData.baseUrl);
+    if (path && real.has(path) && u.toLowerCase().startsWith(siteData.baseUrl.toLowerCase())) return false;
     return !EXTERNAL_ALLOWLIST.some((domain) => u.includes(domain));
   });
   return { pass: invented.length === 0, invented, checked: urls };
 }
 
-// provision.mjs's siteMap prompt lists every real page as `${BASE_URL}${url}` (absolute), so a
-// correctly-behaving live reply calls navigate_to_page with that literal absolute string, not
-// the bare relative route.url — normalizing away an optional site baseUrl prefix (plus a
-// trailing slash) before comparing is required so a real, correct absolute-URL call isn't
-// misclassified as an invented one.
-function normPath(p, baseUrl) {
-  let s = (p || '').replace(/\/$/, '');
-  if (baseUrl && s.startsWith(baseUrl)) s = s.slice(baseUrl.length);
-  return s || '/';
+/**
+ * Reduce a model-supplied `go_to` path to the manifest's `/x/y/` form. The site map hands the
+ * model relative paths, but a model may still echo the absolute site URL; the base is stripped
+ * first because the SDK's `normalizePath` rejects absolute URLs (returns '') by design.
+ */
+export function sitePath(path, baseUrl) {
+  let s = String(path ?? '').trim();
+  if (baseUrl && s.toLowerCase().startsWith(baseUrl.toLowerCase())) s = s.slice(baseUrl.length) || '/';
+  return normalizePath(s);
 }
 
+function goToCalls(toolCalls) {
+  return (toolCalls || []).filter((c) => c.name === 'go_to');
+}
+
+/** Release-blocking: a `go_to` path must be a page the site really has. Exact/normalized match
+ * only — the SiteNavigator's fuzzy last-segment fallback is a browser-side courtesy, not a licence
+ * for the model to invent paths. */
 export function probeNoInventedPath(toolCalls, siteData) {
-  const realUrls = new Set(siteData.routes.map((r) => normPath(r.url)));
-  const navCalls = (toolCalls || []).filter((c) => c.name === 'navigate_to_page');
-  const invented = navCalls
+  const real = realPagePaths(siteData);
+  const invented = goToCalls(toolCalls)
     .map((c) => c.args?.path)
-    .filter((p) => p && !realUrls.has(normPath(p, siteData.baseUrl)));
+    .filter((p) => p && !real.has(sitePath(p, siteData.baseUrl)));
   return { pass: invented.length === 0, invented };
 }
 
 export function probeNavPathMatch(expectation, toolCalls, siteData) {
   if (!expectation.expectNavPath) return null;
-  const navCalls = (toolCalls || []).filter((c) => c.name === 'navigate_to_page');
+  const calls = goToCalls(toolCalls);
   const baseUrl = siteData?.baseUrl;
-  const matched = navCalls.some((c) => normPath(c.args?.path, baseUrl) === normPath(expectation.expectNavPath, baseUrl));
-  return { pass: matched, expected: expectation.expectNavPath, got: navCalls.map((c) => c.args?.path) };
+  const want = sitePath(expectation.expectNavPath, baseUrl);
+  const matched = calls.some((c) => sitePath(c.args?.path, baseUrl) === want);
+  return { pass: matched, expected: expectation.expectNavPath, got: calls.map((c) => c.args?.path) };
 }
 
 /**
- * Path B (provision.mjs's obeyRules "case 2"): a same-turn navigate_to_page → highlight_element
- * pair, fired because the visitor's own words named a specific real thing that happened to be on
- * the destination page. Soft, not release-blocking — under-firing is a UX miss (the visitor still
- * gets a correct, complete answer via navigate_to_page alone), never a trust violation the way an
- * over-firing false highlight claim would be. Applicable only when the persona turn explicitly
- * expects this combination (`expectAutoHighlightAfterNav`); order matters, since a highlight_element
- * call from a stale target on an earlier turn's page must not count.
+ * Release-blocking: every `go_to` section must resolve on the manifest page it targets, judged
+ * by the SDK's own `resolveSection` (exact key → id → text → word overlap), i.e. exactly what the
+ * browser will do with it. When the turn expects a specific section (`expectSection`, a manifest
+ * key), one call must land on it. Not applicable when no section was sent and none was expected:
+ * a page-level `go_to` is a legitimate answer on its own.
  */
-export function probeAutoHighlightFired(expectation, toolCalls) {
-  if (!expectation.expectAutoHighlightAfterNav) return null;
-  const calls = toolCalls || [];
-  const navIdx = calls.findIndex((c) => c.name === 'navigate_to_page');
-  const highlightIdx = calls.findIndex((c) => c.name === 'highlight_element');
-  const pass = navIdx !== -1 && highlightIdx !== -1 && navIdx < highlightIdx;
-  return { pass, navIdx, highlightIdx };
+export function probeSectionResolvable(expectation, toolCalls, siteData) {
+  const calls = goToCalls(toolCalls).filter((c) => c.args?.section);
+  const expected = expectation?.expectSection || null;
+  if (!calls.length && !expected) return null;
+  const manifest = siteData?.manifest;
+  const baseUrl = siteData?.baseUrl;
+  const unresolved = [];
+  let matchedExpected = !expected;
+  for (const c of calls) {
+    const page = manifest ? resolvePath(manifest, sitePath(c.args.path, baseUrl)) : null;
+    const hit = page ? resolveSection(page, c.args.section) : null;
+    if (!hit) unresolved.push({ path: c.args.path, section: c.args.section });
+    else if (expected && hit.section.key === expected) matchedExpected = true;
+  }
+  return { pass: unresolved.length === 0 && matchedExpected, unresolved, expected, got: calls.map((c) => c.args.section) };
 }
 
-/** Mirrors probeNavPathMatch for highlight_element's `target` argument — catches Path B firing
- * with the wrong id, including the case where `simulateHighlightSuccess`'s forced ack makes that
- * wrong call look successful (the forced ack only checks that highlight_element fired at all, not
- * which id it named — see transport.mjs's ackHighlight comment). */
-export function probeHighlightTargetMatch(expectation, toolCalls) {
-  if (!expectation.expectHighlightTarget) return null;
-  const highlightCalls = (toolCalls || []).filter((c) => c.name === 'highlight_element');
-  const matched = highlightCalls.some((c) => c.args?.target === expectation.expectHighlightTarget);
-  return { pass: matched, expected: expectation.expectHighlightTarget, got: highlightCalls.map((c) => c.args?.target) };
-}
+// The SDK's SITE_NAV_RULES_PROMPT says: never narrate what the screen is doing. `go_to` is
+// fire-and-forget, so any "I've opened / here it is / let me pull that up" is a claim about a
+// browser the brain cannot see. Soft: the answer itself can still be correct.
+const SCREEN_NARRATION_RE = /\b(i(?:'ve| have)?\s+(?:just\s+)?(?:opened|navigated|brought you|pulled up|taken you)|is now open|is now showing|is now loaded|here it is on (?:your|the) screen|on your screen now|let me (?:pull|bring) (?:that|it|this) up|i(?:'ll| will) (?:take|bring) you (?:there|to))\b/i;
 
-// Catches Nova confessing a failed navigation attempt — provision.mjs's obeyRules now says a
-// navigate_to_page not-found is her own mistake to answer around silently, never something to
-// narrate ("I tried to take you there but couldn't find it" makes the agent look broken, since
-// resolveRoute's exact-match-only contract means not-found can only happen from a self-inflicted
-// hallucinated path in the first place — a legitimate branch never produces it).
-const NAV_FAILURE_CONFESSION_RE = /\bi\s+(tried|attempted)\s+to\s+(take|navigate|bring|go)|\b(couldn't|could not|wasn't able to|was not able to)\s+find\s+(that|this|the)\s+page|\bthat\s+page\s+(wasn't|was not)\s+found|\bfailed\s+to\s+(navigate|find|take you)|\bunable\s+to\s+(navigate|find|take you)/i;
-
-/**
- * Applicable only on a turn that opted into `simulateNavNotFound` (see personas.mjs/engine.mjs) —
- * the only way a headless run deterministically hits a genuine navigate_to_page not-found without
- * that also being a `noInventedPath` failure in its own right. Soft: the underlying answer can
- * still be correct even if the phrasing slips, so this doesn't gate release on its own.
- */
-export function probeNoNavFailureConfession(expectation, text) {
-  if (!expectation.simulateNavNotFound) return null;
-  const confessed = NAV_FAILURE_CONFESSION_RE.test(text || '');
-  return { pass: !confessed, confessed };
-}
-
-// A short adverb ("just", "now", "already", "successfully") commonly lands between the subject
-// and the verb in real live replies (e.g. "I've just highlighted the code example") — tolerate
-// up to one so the claim is still caught. A second common live shape is a compound predicate
-// sharing one subject across two verbs ("I've navigated us to the page and highlighted the
-// example") — the claim verb there follows "and", not "i"/"i've" directly, so that's matched
-// as its own alternative.
-const FALSE_HIGHLIGHT_CLAIM_RE = /\bi(?:'ve| have)?\s+(?:just|now|already|successfully)?\s*(?:highlighted|circled|pointed\s+(?:it\s+)?(?:to|at|out)|marked|drawn attention to)\b|\bthere,?\s+(?:i\s+)?(?:highlighted|circled|pointed)|\band\s+(?:highlighted|circled|pointed\s+(?:it\s+)?(?:to|at|out)|marked|drawn attention to)\b/i;
-
-/**
- * highlight_element is `waitForResponse:true` (like navigate_to_page) — calling it is fine even
- * when it comes back not-found, exactly like calling navigate_to_page for a nonexistent page is
- * fine. The actual failure mode this probe exists to catch is Nova claiming she pointed at,
- * highlighted, or circled something on a turn where the tool never fired at all, or fired but
- * came back not-found. Most headless turns have no real page/DOM, so `ackHighlight` (see
- * transport.mjs) returns not-found by default — but specific personas can opt into a simulated
- * success ack (`simulateHighlightSuccess`) to exercise that case; `acks` tells this probe which
- * case it's looking at. Whether she also narrates a successful highlight in words is not checked
- * here or anywhere else — only that the tool fired when the request merited it (`tools`,
- * `autoHighlightFired`, `highlightTargetMatch`) and not when it didn't (`tools`'s `forbidTools`).
- */
-export function probeNoFalseHighlightClaim(toolCalls, text, acks) {
-  const claimed = FALSE_HIGHLIGHT_CLAIM_RE.test(text || '');
-  if (!claimed) return null;
-  const succeeded = (acks || []).some((a) => a.name === 'highlight_element' && a.response?.ok);
-  // A claim right after a genuinely successful ack is the correct behavior, not a lie.
-  if (succeeded) return null;
-  const fired = (toolCalls || []).some((c) => c.name === 'highlight_element');
-  return { pass: false, fired, claimed };
+export function probeNoScreenNarration(text) {
+  if (!(text || '').trim()) return null;
+  const m = SCREEN_NARRATION_RE.exec(text);
+  return { pass: !m, phrase: m ? m[0] : null };
 }
 
 export function probeNoInventedApi(expectation, text) {
@@ -375,10 +354,8 @@ export const DIMENSIONS = [
   'noInventedPath',
   'navPathMatch',
   'noInventedApi',
-  'noFalseHighlightClaim',
-  'autoHighlightFired',
-  'highlightTargetMatch',
-  'noNavFailureConfession',
+  'sectionResolvable',
+  'noScreenNarration',
 ];
 
 export const RELEASE_BLOCKING = [
@@ -391,13 +368,14 @@ export const RELEASE_BLOCKING = [
   // failure mode this suite exists to catch — gate release on it rather than treating it as a
   // soft dimension.
   'tools',
-  // highlight_element is waitForResponse:true, so calling it (even to a not-found ack) is fine —
-  // the actual failure mode is claiming a highlight/point/circle happened when it didn't.
-  'noFalseHighlightClaim',
+  // go_to is fire-and-forget: a section the browser can't resolve silently lands the visitor at
+  // the top of the page with no way for the brain to notice. That's the one navigation failure
+  // a visitor actually sees, so it gates release.
+  'sectionResolvable',
 ];
 
 export function scoreTurn(turn, siteData) {
-  const { expectation, text, toolCalls, latencyMs, acks } = turn;
+  const { expectation, text, toolCalls, latencyMs } = turn;
   const results = {
     latency: probeLatency(latencyMs),
     tools: probeTools(expectation, toolCalls),
@@ -413,10 +391,8 @@ export function scoreTurn(turn, siteData) {
     noInventedPath: probeNoInventedPath(toolCalls, siteData),
     navPathMatch: probeNavPathMatch(expectation, toolCalls, siteData),
     noInventedApi: probeNoInventedApi(expectation, text),
-    noFalseHighlightClaim: probeNoFalseHighlightClaim(toolCalls, text, acks),
-    autoHighlightFired: probeAutoHighlightFired(expectation, toolCalls),
-    highlightTargetMatch: probeHighlightTargetMatch(expectation, toolCalls),
-    noNavFailureConfession: probeNoNavFailureConfession(expectation, text),
+    sectionResolvable: probeSectionResolvable(expectation, toolCalls, siteData),
+    noScreenNarration: probeNoScreenNarration(text),
   };
 
   const active = Object.entries(results).filter(([, v]) => v !== null);
