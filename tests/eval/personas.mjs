@@ -372,7 +372,9 @@ export function buildPersonas(siteData) {
           relevanceAny: ['turn-taking', 'turn taking', 'interrupt', 'sync', 'grounding', 'analytics', 'latency', 'recording'],
         },
         {
-          prompt: 'Which part of that page shows what runs where?',
+          prompt: 'On the "Inside a live conversation" page, which part shows what runs where?',
+          expectTools: ['go_to'],
+          expectNavPath: '/explanation/inside-a-live-conversation/',
           ...(threeFlowsKeys.length ? { expectSection: threeFlowsKeys } : {}),
         },
         {

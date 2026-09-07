@@ -10,7 +10,7 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
-  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine,
+  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE,
   targetArgsLine, rewriteTargetMarkup,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS,
 } = await import('../../server/provision.mjs');
@@ -293,17 +293,18 @@ test('splitIntoSections: a section at exactly SUBCHUNK_THRESHOLD stays whole; on
   assert.ok(split[2].includes(`${ARGS('/p/', 'edge')}\nPart of section: Edge\n`));
 });
 
-/* labelHomeLine — the SITE MAP's "/: k1, k2" home line reads like a list of pages; label it. */
-test('labelHomeLine: rewrites only the home line, keeps every other line and the block shape', () => {
+/* labelHomeLine — the SITE MAP's "/: k1, k2" home line reads like a list of pages; put a note above it. */
+test('labelHomeLine: adds the note above the home line only, keeps every other line and the block shape', () => {
   const block = { key: 'siteMap', headerTemplate: 'SITE MAP.', type: 'custom', value: '/: meet-nova, why-sdk\n/guides/x/: a, b\n/reference/: c' };
   const out = labelHomeLine(block);
-  assert.equal(out.value, '/ (home page; the keys after it are its sections, not pages): meet-nova, why-sdk\n/guides/x/: a, b\n/reference/: c');
+  assert.equal(out.value, `${HOME_LINE_NOTE}\n/: meet-nova, why-sdk\n/guides/x/: a, b\n/reference/: c`);
+  assert.match(out.value, /^\/: meet-nova/m); // the path token itself is untouched
   assert.equal(out.key, 'siteMap');
   assert.equal(out.headerTemplate, 'SITE MAP.');
   assert.equal(block.value, '/: meet-nova, why-sdk\n/guides/x/: a, b\n/reference/: c'); // input untouched
 });
 test('labelHomeLine: home line not first, and a manifest without a home page', () => {
-  assert.equal(labelHomeLine({ value: '/guides/x/: a\n/: b' }).value, '/guides/x/: a\n/ (home page; the keys after it are its sections, not pages): b');
+  assert.equal(labelHomeLine({ value: '/guides/x/: a\n/: b' }).value, `/guides/x/: a\n${HOME_LINE_NOTE}\n/: b`);
   assert.equal(labelHomeLine({ value: '/guides/x/: a\n/reference/: c' }).value, '/guides/x/: a\n/reference/: c');
 });
 

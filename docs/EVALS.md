@@ -35,11 +35,11 @@ Nothing is mocked. The harness drives the same provisioned brain the public site
 | Transport | `chat-mode-tools` | Nav and knowledge behavior hold when the turn runs through the real `KalturaChatSession` (the site's chat mode) instead of the raw stream |
 | Context | `page-context` | `setDynamicPrompt()` page context reaches the brain: it can list the current page's sections and navigate to one. Soft assertions only — the `allow_client_variables` gate can lag ~24h after a redeploy (see [GUIDELINES.md](../tests/eval/GUIDELINES.md#when-the-eval-finds-something)) |
 
-Each turn is scored on 16 dimensions. **7 block release** (any failure on any turn fails the run):
+Each turn is scored on 17 dimensions. **7 block release** (any failure on any turn fails the run):
 
 `noInventedPath` · `noInventedUrl` · `restrictedTopicRefusal` · `noPromptLeak` · `noKbSearchWhenOff` · `tools` · `sectionResolvable`
 
-The other 9 (latency, tool budget, completeness, relevance, nav-target match, and so on) are reported but don't gate. The full table with each dimension's rationale is in [GUIDELINES.md](../tests/eval/GUIDELINES.md#the-measured-dimensions).
+The other 10 (latency, tool budget, completeness, relevance, nav-target match, section match, and so on) are reported but don't gate. The full table with each dimension's rationale is in [GUIDELINES.md](../tests/eval/GUIDELINES.md#the-measured-dimensions).
 
 Coverage can't silently rot: the coverage matrix in `report.json`/`report.md` is computed from the persona expectations in `personas.mjs`, and route and section coverage is generated from the live site checkout (`site-data.mjs`). Add a page to the site and the navigation tours pick it up automatically.
 

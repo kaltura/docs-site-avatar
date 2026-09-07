@@ -4,7 +4,7 @@ import {
   toolNames, probeLatency, probeTools, probeCompleteness, probeRelevance,
   probeSingleToolCallPerTurn, probeNoKbSearchWhenOff, probeRestrictedTopicRefusal,
   probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probeNoInventedUrl, probeNoInventedPath,
-  probeNavPathMatch, probeNoInventedApi, probeSectionResolvable, probeNoScreenNarration,
+  probeNavPathMatch, probeNoInventedApi, probeSectionResolvable, probeSectionMatch, probeNoScreenNarration,
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
 import { unionScored } from './engine.mjs';
@@ -385,14 +385,15 @@ test('noInventedApi: a denial followed by an explicit contradictory affirmation 
 });
 
 /* section resolvable — go_to's section arg must resolve on the manifest page it targets */
-test('sectionResolvable: not applicable when no section was sent and none was expected', () => {
+test('sectionResolvable: not applicable when no section was sent, even if one was expected', () => {
   assert.equal(probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/' } }], siteData), null);
+  assert.equal(probeSectionResolvable({ expectSection: 'install' }, [{ name: 'go_to', args: { path: '/getting-started/' } }], siteData), null);
 });
 test('sectionResolvable: a blank section is treated as no section, like the SiteNavigator does', () => {
   for (const section of ['', '   ']) {
     const calls = [{ name: 'go_to', args: { path: '/getting-started/', section } }];
     assert.equal(probeSectionResolvable({}, calls, siteData), null);
-    assert.equal(probeSectionResolvable({ expectSection: 'install' }, calls, siteData).pass, false);
+    assert.equal(probeSectionMatch({ expectSection: 'install' }, calls, siteData).pass, false);
   }
 });
 test('sectionResolvable: a section key that resolves on the targeted page passes', () => {
@@ -408,19 +409,41 @@ test('sectionResolvable: resolves by free-text phrase against section text, not 
   const r = probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/', section: 'install the sdk' } }], siteData);
   assert.equal(r.pass, true);
 });
-test('sectionResolvable: an expected section that never got called fails', () => {
-  const r = probeSectionResolvable({ expectSection: 'install' }, [{ name: 'go_to', args: { path: '/getting-started/' } }], siteData);
-  assert.equal(r.pass, false);
-});
-test('sectionResolvable: a call landing on the expected section key passes', () => {
+test('sectionResolvable: a valid section on a page other than the expected one still resolves', () => {
   const r = probeSectionResolvable({ expectSection: 'install' },
+    [{ name: 'go_to', args: { path: '/', section: 'quick-start' } }], siteData);
+  assert.equal(r.pass, true);
+});
+
+/* section match — soft: did go_to land on the section the turn expected? */
+test('sectionMatch: not applicable when the turn expects no section', () => {
+  assert.equal(probeSectionMatch({}, [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData), null);
+});
+test('sectionMatch: an expected section that never got called fails', () => {
+  const r = probeSectionMatch({ expectSection: 'install' }, [{ name: 'go_to', args: { path: '/getting-started/' } }], siteData);
+  assert.equal(r.pass, false);
+  assert.deepEqual(r.got, []);
+});
+test('sectionMatch: a call landing on the expected section key passes', () => {
+  const r = probeSectionMatch({ expectSection: 'install' },
     [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData);
   assert.equal(r.pass, true);
 });
-test('sectionResolvable: expectSection may list several acceptable keys', () => {
+test('sectionMatch: a free-text section that resolves to the expected key passes', () => {
+  const r = probeSectionMatch({ expectSection: 'install' },
+    [{ name: 'go_to', args: { path: '/getting-started/', section: 'install the sdk' } }], siteData);
+  assert.equal(r.pass, true);
+});
+test('sectionMatch: a valid section that is not the expected one is a miss', () => {
+  const r = probeSectionMatch({ expectSection: 'install' },
+    [{ name: 'go_to', args: { path: '/', section: 'quick-start' } }], siteData);
+  assert.equal(r.pass, false);
+  assert.deepEqual(r.got, ['quick-start']);
+});
+test('sectionMatch: expectSection may list several acceptable keys', () => {
   const calls = [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }];
-  assert.equal(probeSectionResolvable({ expectSection: ['quick-start', 'install'] }, calls, siteData).pass, true);
-  assert.equal(probeSectionResolvable({ expectSection: ['quick-start'] }, calls, siteData).pass, false);
+  assert.equal(probeSectionMatch({ expectSection: ['quick-start', 'install'] }, calls, siteData).pass, true);
+  assert.equal(probeSectionMatch({ expectSection: ['quick-start'] }, calls, siteData).pass, false);
 });
 
 /* no screen narration — go_to is fire-and-forget, so narrating what the browser is doing is a

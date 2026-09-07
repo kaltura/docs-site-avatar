@@ -295,9 +295,8 @@ export function probeNavPathMatch(expectation, toolCalls, siteData) {
 /**
  * Release-blocking: every `go_to` section must resolve on the manifest page it targets, judged
  * by the SDK's own `resolveSection` (exact key → id → text → word overlap), i.e. exactly what the
- * browser will do with it. When the turn expects a specific section (`expectSection`, a manifest
- * key or an array of acceptable keys), one call must land on one of them. Not applicable when no
- * section was sent and none was expected: a page-level `go_to` is a legitimate answer on its own.
+ * browser will do with it. Not applicable when no section was sent: a page-level `go_to` is a
+ * legitimate answer on its own. Whether it was the *expected* section is `sectionMatch`'s job.
  * A blank section (`''` or whitespace) is "no section": the SiteNavigator ignores it and scrolls
  * to the page top, so it is judged the same way here.
  */
@@ -308,20 +307,33 @@ function hasSection(call) {
 
 export function probeSectionResolvable(expectation, toolCalls, siteData) {
   const calls = goToCalls(toolCalls).filter(hasSection);
+  if (!calls.length) return null;
+  const unresolved = calls.filter((c) => !resolvedSectionKey(c, siteData)).map((c) => ({ path: c.args.path, section: c.args.section }));
+  return { pass: unresolved.length === 0, unresolved, got: calls.map((c) => c.args.section) };
+}
+
+/**
+ * Soft: when the turn names the section it should land on (`expectSection`, a manifest key or an
+ * array of acceptable keys), one `go_to` call must resolve to one of them. A valid section on a
+ * different page, or a page-level call where a section was expected, is a ground-truth miss the
+ * visitor survives (they land somewhere real), so it does not gate release the way an
+ * unresolvable section does.
+ */
+export function probeSectionMatch(expectation, toolCalls, siteData) {
   const expected = expectation?.expectSection || null;
   const expectedKeys = Array.isArray(expected) ? expected : expected ? [expected] : [];
-  if (!calls.length && !expectedKeys.length) return null;
+  if (!expectedKeys.length) return null;
+  const calls = goToCalls(toolCalls).filter(hasSection);
+  const landed = calls.map((c) => resolvedSectionKey(c, siteData)).filter(Boolean);
+  return { pass: landed.some((k) => expectedKeys.includes(k)), expected, got: calls.map((c) => c.args.section) };
+}
+
+/** The manifest key a `go_to` call's section resolves to on the page it targets, or null. */
+function resolvedSectionKey(call, siteData) {
   const manifest = siteData?.manifest;
-  const baseUrl = siteData?.baseUrl;
-  const unresolved = [];
-  let matchedExpected = !expectedKeys.length;
-  for (const c of calls) {
-    const page = manifest ? resolvePath(manifest, sitePath(c.args.path, baseUrl)) : null;
-    const hit = page ? resolveSection(page, c.args.section) : null;
-    if (!hit) unresolved.push({ path: c.args.path, section: c.args.section });
-    else if (expectedKeys.includes(hit.section.key)) matchedExpected = true;
-  }
-  return { pass: unresolved.length === 0 && matchedExpected, unresolved, expected, got: calls.map((c) => c.args.section) };
+  const page = manifest ? resolvePath(manifest, sitePath(call.args.path, siteData?.baseUrl)) : null;
+  const hit = page ? resolveSection(page, call.args.section) : null;
+  return hit ? hit.section.key : null;
 }
 
 // The SDK's SITE_NAV_RULES_PROMPT says: never narrate what the screen is doing. `go_to` is
@@ -367,6 +379,7 @@ export const DIMENSIONS = [
   'noInventedUrl',
   'noInventedPath',
   'navPathMatch',
+  'sectionMatch',
   'noInventedApi',
   'sectionResolvable',
   'noScreenNarration',
@@ -404,6 +417,7 @@ export function scoreTurn(turn, siteData) {
     noInventedUrl: probeNoInventedUrl(text, siteData),
     noInventedPath: probeNoInventedPath(toolCalls, siteData),
     navPathMatch: probeNavPathMatch(expectation, toolCalls, siteData),
+    sectionMatch: probeSectionMatch(expectation, toolCalls, siteData),
     noInventedApi: probeNoInventedApi(expectation, text),
     sectionResolvable: probeSectionResolvable(expectation, toolCalls, siteData),
     noScreenNarration: probeNoScreenNarration(text),
