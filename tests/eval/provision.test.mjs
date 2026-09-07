@@ -10,7 +10,7 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
-  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE,
+  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS,
 } = await import('../../server/provision.mjs');
@@ -303,9 +303,30 @@ test('labelHomeLine: adds the note above the home line only, keeps every other l
   assert.equal(out.headerTemplate, 'SITE MAP.');
   assert.equal(block.value, '/: meet-nova, why-sdk\n/guides/x/: a, b\n/reference/: c'); // input untouched
 });
+test('labelHomeLine: two-line SITE MAP (title line above the path line) keeps the title and notes the home line', () => {
+  const value = '@kaltura/intelligent-agents\n/: meet-nova, why-sdk\n\nGuides\n/guides/x/: a, b';
+  assert.equal(labelHomeLine({ value }).value, `@kaltura/intelligent-agents\n${HOME_LINE_NOTE}\n/: meet-nova, why-sdk\n\nGuides\n/guides/x/: a, b`);
+});
 test('labelHomeLine: home line not first, and a manifest without a home page', () => {
   assert.equal(labelHomeLine({ value: '/guides/x/: a\n/: b' }).value, `/guides/x/: a\n${HOME_LINE_NOTE}\n/: b`);
   assert.equal(labelHomeLine({ value: '/guides/x/: a\n/reference/: c' }).value, '/guides/x/: a\n/reference/: c');
+});
+
+/* docsFromManifest — the corpus page list is the go_to manifest's page list, one source file per path */
+test('docsFromManifest: one doc per manifest page, in manifest order, with the file fileForUrl resolves', () => {
+  const manifest = { pages: [
+    { path: '/', title: '@kaltura/intelligent-agents', sections: [] },
+    { path: '/reference/wire-protocol/whep/', title: 'WHEP', sections: [{ key: 'a', id: 'a' }] },
+    { path: '/guides/x/', sections: [] },
+  ] };
+  assert.deepEqual(docsFromManifest(manifest), [
+    { title: '@kaltura/intelligent-agents', url: '/', file: 'index.md' },
+    { title: 'WHEP', url: '/reference/wire-protocol/whep/', file: 'reference/wire-protocol/whep.md' },
+    { title: '', url: '/guides/x/', file: 'guides/x.md' },
+  ]);
+});
+test('docsFromManifest: an empty manifest yields no docs', () => {
+  assert.deepEqual(docsFromManifest({ pages: [] }), []);
 });
 
 /* hashDocs — the fingerprint provision() uses to skip re-uploading an unchanged knowledge base */

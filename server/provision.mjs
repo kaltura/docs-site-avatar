@@ -84,10 +84,10 @@ const kaltura = new Management({ partnerId, adminSecret });
 
 function prompt(key, headerTemplate, value) { return { key, label: key, headerTemplate, type: 'custom', value }; }
 
-/** nav.js's url→file mapping is a fixed convention of the site's own build (see
+/** A page path's source file is a fixed convention of the site's own build (see
  * eleventy.config.js's `siteLink` filter and the site's directory layout):
  * strip the leading/trailing slash and append `.md`. Home (`/`) is the one
- * exception — it resolves to `index.md`, matching loadDocs' own Home entry. */
+ * exception — it resolves to `index.md`. */
 export function fileForUrl(url) {
   const stripped = url.replace(/^\//, '').replace(/\/$/, '');
   return stripped ? `${stripped}.md` : 'index.md';
@@ -318,28 +318,28 @@ export function githubSlugify(s) {
   return String(s).trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
 }
 
-/** The exact list of real pages this intellect may ever cite — Home plus every
- * page in nav.js, each resolved to its on-disk file. Built fresh per run (never
- * module scope) since it depends on the resolved --site-dir. */
-async function loadDocs(siteDir) {
-  const navPath = join(siteDir, 'src', '_data', 'nav.js');
-  const navModule = await import(`file://${navPath}?t=${Date.now()}`);
-  /** @type {{group:string, pages:{title:string,url:string}[]}[]} */
-  const nav = navModule.default;
-  const docs = [{ group: 'Home', title: 'Home', url: '/', file: 'index.md' }];
-  for (const section of nav) {
-    for (const page of section.pages) {
-      docs.push({ group: section.group, title: page.title, url: page.url, file: fileForUrl(page.url) });
-    }
-  }
-  return docs;
+/** The exact list of real pages this intellect may ever cite: every page in the go_to sections
+ * manifest, each resolved to its on-disk file. The manifest is built from the site's rendered
+ * output, so it lists every published page, including sub-pages that nav.js leaves out. Using it
+ * keeps the corpus and the SITE MAP in lockstep: a page the brain can navigate to is a page it can
+ * also read. */
+export function docsFromManifest(manifest) {
+  return manifest.pages.map((p) => ({ title: p.title || '', url: p.path, file: fileForUrl(p.path) }));
 }
 
 /** Reads + frontmatter-strips every doc ONCE, attaching `.markdown` (for wireKnowledge and
- * hashDocs) in place. */
+ * hashDocs) in place. A manifest page with no source file means the checkout and the published
+ * site disagree; fail with the path tried rather than shipping a corpus with a hole in it. */
 async function loadDocContent(siteDir, docs) {
   for (const doc of docs) {
-    const text = await readFile(join(siteDir, 'src', doc.file), 'utf8');
+    const file = join(siteDir, 'src', doc.file);
+    let text;
+    try {
+      text = await readFile(file, 'utf8');
+    } catch (err) {
+      if (err?.code === 'ENOENT') throw new Error(`manifest page ${doc.url} has no source file at ${file}. Is --site-dir the checkout the published manifest was built from?`);
+      throw err;
+    }
     doc.markdown = stripFrontmatter(text);
   }
 }
@@ -390,7 +390,7 @@ const KEY_FACTS = `
 - Package: @kaltura/intelligent-agents — a zero-runtime-dependency JavaScript SDK (ESM + JSDoc) for building and operating Kaltura Agentic Avatars.
 - Two entry points: ./management (provision/configure/measure agents, server-side) and ./experience (the live socket+WHEP runtime, browser).
 - Optional plugin subpaths that don't bloat the base runtime: ./experience/presenter (deck-walkthrough), ./experience/genui (widget rendering), ./experience/analytics (KAVA events), ./experience/noise-suppressor (AudioWorklet noise gate).
-- Distribution: @kaltura/intelligent-agents is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.17.0 (.../gh/kaltura/intelligent-agents-sdk@v1.17.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
+- Distribution: @kaltura/intelligent-agents is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.18.0 (.../gh/kaltura/intelligent-agents-sdk@v1.18.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
 - Conversations run over two interchangeable transports: KalturaAvatarSession (live avatar video over WebRTC + socket) and KalturaChatSession (text-only over HTTP streaming — no camera, mic, or WebRTC at all). KalturaAgentSession wraps both and can switch mid-conversation with switchMode(), keeping the same thread, memory, tools, and request variables — the modeChanged event reports threadContinuity: true when the conversation carried over.
 - Client-supplied request_vars sent WITH a converse message are gated: the intellect must have allow_client_variables set to true (toggle via intellects.setClientVariablesEnabled). With the gate off the turn fails SILENTLY as an empty reply — no error reaches the wire on either transport, because the server rejects after the response stream has opened. Both experience session classes emit a once-per-session warning event (code empty_turn_with_request_vars, naming the offending keys); the management SDK's converse helpers surface a typed client_variables_disabled error only in the pre-stream case. Reserved sys__ variables (like sys__user_id) are server-injected every turn and rejected if a client tries to set them, regardless of that gate.
 - License: MIT. No Kaltura account is needed to read, fork, or build on the source; a Kaltura account with the Agentic Avatar feature enabled is needed to call the live APIs it wraps.
@@ -498,13 +498,12 @@ async function provision() {
     console.log('✓ no tag collision for', TAG);
   }
 
-  const docs = await loadDocs(siteDir);
-  console.log(`✓ found ${docs.length} docs under ${siteDir}`);
-  await loadDocContent(siteDir, docs);
-
   // Load the go_to manifest BEFORE any knowledge teardown: a missing/invalid manifest must fail
-  // the run while the previous deploy is still fully intact.
+  // the run while the previous deploy is still fully intact. The corpus is derived from it.
   const manifest = await loadManifest(sectionsFile);
+  const docs = docsFromManifest(manifest);
+  await loadDocContent(siteDir, docs);
+  console.log(`✓ loaded ${docs.length} docs under ${siteDir}`);
   const docsHash = hashDocs(docs, manifest);
   const siteMapBlock = labelHomeLine(siteMapPrompt(manifest, { warn: (m) => console.warn(`⚠ ${m}`) }));
   const sectionCount = manifest.pages.reduce((n, p) => n + p.sections.length, 0);

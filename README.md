@@ -1,6 +1,6 @@
 # Nova — the live SDK docs assistant
 
-Nova is a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agents` docs site (the public GitHub Pages site, `gh-pages-src` branch). She answers visitor questions grounded in the site's own 25 Diátaxis pages, and drives real in-page navigation — including deep-linking to a specific section — via a single fire-and-forget `go_to(path, section?)` tool.
+Nova is a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agents` docs site (the public GitHub Pages site, `gh-pages-src` branch). She answers visitor questions grounded in every page of the site (the same page list as the `go_to` sections manifest), and drives real in-page navigation — including deep-linking to a specific section — via a single fire-and-forget `go_to(path, section?)` tool.
 
 This repo does two things:
 
