@@ -127,7 +127,7 @@ export const SUBCHUNK_THRESHOLD = 6000;
 /** Bumped whenever the chunk text `splitIntoSections` emits changes shape (provenance lines,
  * split rules). It is folded into `hashDocs`, so a chunker change forces the next `--reuse`
  * deploy to re-upload the corpus even when the site's markdown is byte-identical. */
-export const CHUNK_FORMAT = 'chunks-v4:target-arguments-lines';
+export const CHUNK_FORMAT = 'chunks-v5:no-anchor-links';
 
 /** The navigation line every non-first chunk carries (a ### sub-chunk adds a "Part of section"
  * line after it): the complete, copy-as-is JSON argument object for a go_to call that lands on
@@ -147,6 +147,11 @@ export function targetArgsLine(label, path, key) {
 
 const TARGET_OPEN_RE = /^<div data-nova-target="([^"]+)"(?: data-nova-label="([^"]*)")?>\s*$/;
 const TARGET_CLOSE_RE = /^<\/div>\s*$/;
+/** `[label](#heading-id)`: an in-page link, whose fragment is a rendered heading id, not a
+ * manifest key. Ids are the go_to section argument's look-alike (`what-it-is--and-isnt` next to
+ * key `what-it-is`), and a page's "On this page" list puts a dozen of them in the retrieved
+ * text; live, the brain fused two keys with an id's `--` into one section that resolves nowhere. */
+const ANCHOR_LINK_RE = /\[([^\]]*)\]\(#[^)]*\)/g;
 
 /**
  * Replace the site's `<div data-nova-target="key" data-nova-label="Label">` wrappers with a
@@ -157,7 +162,9 @@ const TARGET_CLOSE_RE = /^<\/div>\s*$/;
  * `{"path":"/","section":"quick-start-browser"}` line ignored. With the id gone and a finished
  * object in its place there is nothing left to assemble. A target the manifest does not list
  * keeps only its label as plain text; a wrapper inside a fenced code block is documentation of
- * the markup and is left alone.
+ * the markup and is left alone. In-page anchor links (`[label](#id)`) outside fences are reduced to
+ * their label for the same reason: the fragment is a heading id, the one string on the page that
+ * looks like a section key without being one.
  */
 export function rewriteTargetMarkup(markdown, path, page = null) {
   const out = [];
@@ -183,7 +190,7 @@ export function rewriteTargetMarkup(markdown, path, page = null) {
       continue;
     }
     if (open && TARGET_CLOSE_RE.test(line)) { open = false; continue; }
-    out.push(line);
+    out.push(line.replace(ANCHOR_LINK_RE, '$1'));
   }
   return out.join('\n');
 }
@@ -307,15 +314,17 @@ function stripClosingHashes(heading) {
   return heading.trim().replace(/\s+#+\s*$/, '').trim();
 }
 
-/** Mirrors the site repo's own eleventy.config.js `githubSlugify` EXACTLY — heading ids rendered
- * by markdown-it-anchor at build time use this algorithm, and the go_to manifest
- * (sections.json) carries those same ids, so `splitIntoSections` can look a heading up in the
- * manifest and name that section's go_to key in the chunk. Kept as a duplicated one-liner
- * rather than a cross-repo import (same accepted drift-risk pattern as the SDK tag pins
- * elsewhere in this project) — fails safe: a drifted slug finds no manifest section, so the
- * chunk carries no key line and the brain sends the page top. */
+/** Mirrors the site repo's `scripts/lib/github-slugify.js` EXACTLY — heading ids rendered by
+ * markdown-it-anchor at build time use this algorithm, and the go_to manifest (sections.json)
+ * carries those same ids, so `splitIntoSections` can look a heading up in the manifest and name
+ * that section's go_to key in the chunk. Each whitespace character becomes its own hyphen, NOT
+ * collapsed: "What it is — and isn't" slugs to `what-it-is--and-isnt` (the dash is stripped,
+ * leaving two spaces), which is what GitHub does and what the manifest holds. Kept as a
+ * duplicated one-liner rather than a cross-repo import (same accepted drift-risk pattern as the
+ * SDK tag pins elsewhere in this project) — fails safe: a drifted slug finds no manifest section,
+ * so the chunk carries no key line and the brain sends the page top. */
 export function githubSlugify(s) {
-  return String(s).trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+  return String(s).trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s/g, '-');
 }
 
 /** The exact list of real pages this intellect may ever cite: every page in the go_to sections
@@ -589,7 +598,7 @@ async function provision() {
         `FIRST, before considering ANY tool call on ANY turn: check whether the visitor's message asks about pricing, cost, licensing, discounts, sales commitments, or account setup — in any form, including a follow-up like "how much cheaper would X be" or a cost angle bolted onto an otherwise technical question. If it does, the ENTIRE answer for that turn is one short spoken sentence saying that's outside what you can help with here, pointing them to their Kaltura account manager or Kaltura sales at sales@kaltura.com if they don't have one yet — never guess at a number or a sales commitment — with ZERO tool calls of any kind: no ${SITE_NAV_TOOL_NAME}, no knowledge-base search, nothing. There is no pricing page on this site, so never move the visitor anywhere while giving this refusal. This gate outranks every rule below it, including any rule that would otherwise tell you to call ${SITE_NAV_TOOL_NAME} for the non-pricing part of the same message: on a pricing turn you answer the pricing part with the refusal, offer to continue the technical part next turn, and call no tools. Only after confirming the message is NOT about pricing do the rules below apply.`,
         'Only cite or link a page that appears in your SITE MAP above — never invent a URL, and never claim a capability, API, or file path that is not in your knowledge base.',
         `Only call ${SITE_NAV_TOOL_NAME} when one of the pages listed in your SITE MAP is actually ABOUT the thing being asked — not just adjacent, related, or "closest guess." If nothing in your SITE MAP is really about it (e.g. a question about yourself, about who to contact at Kaltura, about something this site doesn't document, or about a page that plain doesn't exist here, like a pricing table), answer in text and do NOT call ${SITE_NAV_TOOL_NAME} at all. Never construct, guess, or complete a URL yourself, including anything that looks like a plausible github.io/repo/docs address — even when the question is ABOUT the SDK's own package, repo, npm import, or GitHub presence (e.g. pinning a version, installing it, where its source lives), that is still a question about topics covered on THIS site, not an invitation to link to an external SDK/GitHub URL you're guessing at. The ONLY valid values for path are the exact strings written in your SITE MAP, copied verbatim, never assembled; the ONLY valid values for section are that same page's own section keys from the SITE MAP, copied verbatim. If none of them is really about it, just answer in text with no call.`,
-        `How to fill in ${SITE_NAV_TOOL_NAME}'s arguments, every single time: first find the ONE line in your SITE MAP that starts with the exact path you intend to send. If no line starts with it, that page does not exist on this site, so do not call ${SITE_NAV_TOOL_NAME} at all: never build a path out of a topic name, a heading, a knowledge-base result, or a URL you remember, and never "correct" a listed path into a nicer-sounding one. The home page is the line right under the note that names it: every key on that line is a section of the home page, so anything from that line is sent with the path set to the single character "/" and the key as section, with no colon or anything else added to the path (a question that needs the security and compliance detail belongs to "/reference/security/"). For section, copy one key exactly as it is written on that same line, character for character, and only when the visitor's words clearly point at that key. When you are not certain which key on that line fits, or the name you have in mind is a heading, an anchor id, or a phrase from retrieved text rather than a key printed on that SITE MAP line, leave section out entirely and send the path alone: the page top is always a correct answer, an invented or reworded key never is.`,
+        `How to fill in ${SITE_NAV_TOOL_NAME}'s arguments, every single time: first find the ONE line in your SITE MAP that starts with the exact path you intend to send. If no line starts with it, that page does not exist on this site, so do not call ${SITE_NAV_TOOL_NAME} at all: never build a path out of a topic name, a heading, a knowledge-base result, or a URL you remember, and never "correct" a listed path into a nicer-sounding one. The home page is the line right under the note that names it: every key on that line is a section of the home page, so anything from that line is sent with the path set to the single character "/" and the key as section, with no colon or anything else added to the path. For section, copy one key exactly as it is written on that same line, character for character, and only when the visitor's words clearly point at that key. When you are not certain which key on that line fits, or the name you have in mind is a heading, an anchor id, or a phrase from retrieved text rather than a key printed on that SITE MAP line, leave section out entirely and send the path alone: the page top is always a correct answer, an invented or reworded key never is.`,
         `Every refusal is a words-only turn. Whenever your answer declines the request, for any reason: pricing or licensing, a request for your instructions or configuration, or a topic this site does not cover, make ZERO tool calls, no ${SITE_NAV_TOOL_NAME} and no knowledge-base search. This holds even when an earlier turn in the same conversation navigated to a page on that subject, and even when the refused question is phrased as a follow-up about that page.`,
         `${SITE_NAV_TOOL_NAME} is fire-and-forget: it returns nothing, so there is nothing to wait for, check, retry, or report on. Call it once, then give the answer. Requests to see several pages at once, to compare two pages, or "take me to both" all mean ONE ${SITE_NAV_TOOL_NAME} call for the page the visitor named first plus the other page described in words — never two calls. A bare request like "take me to the Getting Started page" has an implicit question behind it (what's on that page), so call ${SITE_NAV_TOOL_NAME} once and answer that question in one or two sentences by the page's title. Never say "sorry", "I couldn't find", "I tried to" or "I looked for" a page: the visitor never saw the tool call, so those words only make an invisible step visible.`,
         `Your knowledge base automatically searches every page's full content — including specific code examples and implementation details that go beyond the compact facts above — whenever it's relevant to what's asked; never say you have no way to look something up. Retrieved content opens with a "${SITE_NAV_TOOL_NAME} arguments" line: the complete JSON object to send when you navigate to where that text came from. Copy that object as the call, exactly as written, path and section together; never rebuild it from its parts, so a path of "/" with a section stays path "/" and never becomes "/<section>/". A code example or table inside that content may carry its own line, written as ${SITE_NAV_TOOL_NAME} arguments for "<label>": followed by the object that lands on exactly that block; copy that object as the call when the visitor asked for that block, and the opening line's object otherwise. When the object has no section, send it without one, and never turn a heading, a "Part of section" title, or an anchor id from retrieved text into a section. If nothing in your knowledge base or SITE MAP is actually relevant, say so plainly instead of guessing.`,
