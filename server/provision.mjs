@@ -129,10 +129,11 @@ export const SUBCHUNK_THRESHOLD = 6000;
  * deploy to re-upload the corpus even when the site's markdown is byte-identical. */
 export const CHUNK_FORMAT = 'chunks-v3:go_to-arguments-json';
 
-/** The one provenance line every non-first chunk carries: the complete, copy-as-is JSON argument
- * object for a go_to call that lands on where this text came from. One line instead of separate
- * "path" and "section key" lines because the brain was ASSEMBLING the two (path "/" + key
- * "why-sdk" → "/why-sdk/", a page that does not exist); a finished object leaves nothing to build. */
+/** The navigation line every non-first chunk carries (a ### sub-chunk adds a "Part of section"
+ * line after it): the complete, copy-as-is JSON argument object for a go_to call that lands on
+ * where this text came from. One line instead of separate "path" and "section key" lines because
+ * the brain was ASSEMBLING the two (path "/" + key "why-sdk" → "/why-sdk/", a page that does not
+ * exist); a finished object leaves nothing to build. */
 export function goToArgsLine(path, key = null) {
   const args = key ? { path, section: key } : { path };
   return `${SITE_NAV_TOOL_NAME} arguments: ${JSON.stringify(args)}`;

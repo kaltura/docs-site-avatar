@@ -45,8 +45,9 @@ test('githubSlugify: trims surrounding whitespace', () => {
    heading slug), so the brain copies a finished call instead of assembling one. */
 /** A fake manifest page: ids are the rendered heading slugs, keys are whatever the manifest chose. */
 const pageOf = (...pairs) => ({ sections: pairs.map(([key, id]) => ({ key, id: id ?? key })) });
-/** The exact provenance line for (path, key) — JSON.stringify's canonical no-space form. */
-const ARGS = (path, key) => `go_to arguments: ${JSON.stringify(key ? { path, section: key } : { path })}`;
+/** The provenance line chunks must carry. The exact wire format is pinned once, in the
+ * goToArgsLine test below; the chunk tests only assert that chunks use it. */
+const ARGS = goToArgsLine;
 
 test('goToArgsLine: one JSON object, section only when a key is given', () => {
   assert.equal(goToArgsLine('/', 'why-sdk'), 'go_to arguments: {"path":"/","section":"why-sdk"}');
