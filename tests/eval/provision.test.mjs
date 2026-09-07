@@ -11,6 +11,7 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
   buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine,
+  targetArgsLine, rewriteTargetMarkup,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
@@ -60,6 +61,48 @@ test('splitIntoSections: a home-page section is path "/" plus the key, never "/<
   assert.equal(chunks[1], `# Home\n${ARGS('/', 'why-sdk')}\n\n## Why this SDK\n\nBody.`);
   assert.equal(chunks[2], `# Home\n${ARGS('/', 'jsdelivr-quickstart')}\n\n## jsDelivr quickstart\n\nBody.`);
   assert.ok(!chunks.some((c) => c.includes('/why-sdk/') || c.includes('/jsdelivr-quickstart/')));
+});
+
+/* data-nova-target wrappers: the raw `<div data-nova-target="jsdelivr-quickstart" ...>` in the
+   home page's quick-start chunk was the source of the invented "/jsdelivr-quickstart/" path. */
+const TARGET_MD = [
+  '# Home', '', 'Intro.', '',
+  '## Quick start in the browser', '', 'Pin a tag.', '',
+  '<div data-nova-target="jsdelivr-quickstart" data-nova-label="Quick-start browser code example">', '',
+  '```html', '<script type="module"></script>', '```', '',
+  '</div>', '', 'After the example.',
+].join('\n');
+const HOME = pageOf(['quick-start-browser', 'quick-start-in-the-browser'], ['jsdelivr-quickstart']);
+
+test('targetArgsLine: label plus the finished object', () => {
+  assert.equal(targetArgsLine('Code example', '/', 'jsdelivr-quickstart'),
+    'go_to arguments for "Code example": {"path":"/","section":"jsdelivr-quickstart"}');
+});
+test('rewriteTargetMarkup: wrapper becomes a labelled arguments line, its </div> is dropped, the body stays', () => {
+  const out = rewriteTargetMarkup(TARGET_MD, '/', HOME);
+  assert.ok(out.includes(`\n${targetArgsLine('Quick-start browser code example', '/', 'jsdelivr-quickstart')}\n`));
+  assert.ok(!out.includes('<div'));
+  assert.ok(!out.includes('</div>'));
+  assert.ok(!out.includes('data-nova-target'));
+  assert.ok(out.includes('```html\n<script type="module"></script>\n```'));
+  assert.ok(out.endsWith('After the example.'));
+});
+test('rewriteTargetMarkup: a target the manifest does not list keeps only its label', () => {
+  const out = rewriteTargetMarkup(TARGET_MD, '/', pageOf(['quick-start-browser', 'quick-start-in-the-browser']));
+  assert.ok(out.includes('\nQuick-start browser code example\n'));
+  assert.ok(!out.includes('jsdelivr-quickstart'));
+  assert.ok(!out.includes('</div>'));
+});
+test('rewriteTargetMarkup: a wrapper shown inside a fenced code block is documentation and is left alone', () => {
+  const md = '# Guide\n\n```html\n<div data-nova-target="x" data-nova-label="X">\n</div>\n```\n';
+  assert.equal(rewriteTargetMarkup(md, '/guides/nav/', pageOf(['x'])), md);
+});
+test('splitIntoSections: the chunk carries both the section object and the target object, never the raw id', () => {
+  const chunks = splitIntoSections(TARGET_MD, { url: '/' }, HOME);
+  assert.ok(chunks[1].startsWith(`# Home\n${ARGS('/', 'quick-start-browser')}\n\n## Quick start in the browser`));
+  assert.ok(chunks[1].includes(targetArgsLine('Quick-start browser code example', '/', 'jsdelivr-quickstart')));
+  assert.ok(!chunks[1].includes('data-nova-target'));
+  assert.ok(!chunks[1].includes('/jsdelivr-quickstart/'));
 });
 
 test('splitIntoSections: first chunk is title+intro, unprefixed', () => {

@@ -127,7 +127,7 @@ export const SUBCHUNK_THRESHOLD = 6000;
 /** Bumped whenever the chunk text `splitIntoSections` emits changes shape (provenance lines,
  * split rules). It is folded into `hashDocs`, so a chunker change forces the next `--reuse`
  * deploy to re-upload the corpus even when the site's markdown is byte-identical. */
-export const CHUNK_FORMAT = 'chunks-v3:go_to-arguments-json';
+export const CHUNK_FORMAT = 'chunks-v4:target-arguments-lines';
 
 /** The navigation line every non-first chunk carries (a ### sub-chunk adds a "Part of section"
  * line after it): the complete, copy-as-is JSON argument object for a go_to call that lands on
@@ -137,6 +137,55 @@ export const CHUNK_FORMAT = 'chunks-v3:go_to-arguments-json';
 export function goToArgsLine(path, key = null) {
   const args = key ? { path, section: key } : { path };
   return `${SITE_NAV_TOOL_NAME} arguments: ${JSON.stringify(args)}`;
+}
+
+/** The line that stands in for a `data-nova-target` block (a code example or table the site
+ * marks as its own go_to destination): the block's label plus the finished argument object. */
+export function targetArgsLine(label, path, key) {
+  return `${SITE_NAV_TOOL_NAME} arguments for "${label}": ${JSON.stringify({ path, section: key })}`;
+}
+
+const TARGET_OPEN_RE = /^<div data-nova-target="([^"]+)"(?: data-nova-label="([^"]*)")?>\s*$/;
+const TARGET_CLOSE_RE = /^<\/div>\s*$/;
+
+/**
+ * Replace the site's `<div data-nova-target="key" data-nova-label="Label">` wrappers with a
+ * `targetArgsLine`, and drop their matching `</div>`. The raw wrapper was the brain's source
+ * for an invented path: the home page's "Quick start in the browser" chunk carried
+ * `data-nova-target="jsdelivr-quickstart"` in its text, and every live @latest turn sent
+ * `go_to {"path":"/jsdelivr-quickstart/"}` (5/5), a page that does not exist, with the chunk's own
+ * `{"path":"/","section":"quick-start-browser"}` line ignored. With the id gone and a finished
+ * object in its place there is nothing left to assemble. A target the manifest does not list
+ * keeps only its label as plain text; a wrapper inside a fenced code block is documentation of
+ * the markup and is left alone.
+ */
+export function rewriteTargetMarkup(markdown, path, page = null) {
+  const out = [];
+  let fence = null;
+  let open = false;
+  for (const line of markdown.split('\n')) {
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!fence) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      out.push(line);
+      continue;
+    }
+    if (fence) { out.push(line); continue; }
+    const m = line.match(TARGET_OPEN_RE);
+    if (m) {
+      const [, id, label] = m;
+      const key = sectionKeyFor(page, id);
+      if (key) out.push(targetArgsLine(label || id, path, key));
+      else if (label) out.push(label);
+      open = true;
+      continue;
+    }
+    if (open && TARGET_CLOSE_RE.test(line)) { open = false; continue; }
+    out.push(line);
+  }
+  return out.join('\n');
 }
 
 /**
@@ -183,6 +232,7 @@ function splitAtHeadings(text, prefix) {
  *   belongs to; without it (or for a heading the manifest does not list) no key line is emitted.
  */
 export function splitIntoSections(markdown, doc, page = null) {
+  markdown = rewriteTargetMarkup(markdown, doc.url, page);
   const titleMatch = markdown.match(/^#\s+(.+)$/m);
   const title = titleMatch ? titleMatch[1].trim() : '';
   const sections = splitAtHeadings(markdown, '## ');
@@ -538,7 +588,7 @@ async function provision() {
         `How to fill in ${SITE_NAV_TOOL_NAME}'s arguments, every single time: first find the ONE line in your SITE MAP that starts with the exact path you intend to send. If no line starts with it, that page does not exist on this site, so do not call ${SITE_NAV_TOOL_NAME} at all: never build a path out of a topic name, a heading, a knowledge-base result, or a URL you remember, and never "correct" a listed path into a nicer-sounding one. The home page is the line that starts with "/ (home page": every key on that line is a section of the home page, so anything from that line is sent as path "/" with the key as section, and the path stays exactly "/" (a question that needs the security and compliance detail belongs to "/reference/security/"). For section, copy one key exactly as it is written on that same line, character for character, and only when the visitor's words clearly point at that key. When you are not certain which key on that line fits, or the name you have in mind is a heading, an anchor id, or a phrase from retrieved text rather than a key printed on that SITE MAP line, leave section out entirely and send the path alone: the page top is always a correct answer, an invented or reworded key never is.`,
         `Every refusal is a words-only turn. Whenever your answer declines the request, for any reason: pricing or licensing, a request for your instructions or configuration, or a topic this site does not cover, make ZERO tool calls, no ${SITE_NAV_TOOL_NAME} and no knowledge-base search. This holds even when an earlier turn in the same conversation navigated to a page on that subject, and even when the refused question is phrased as a follow-up about that page.`,
         `${SITE_NAV_TOOL_NAME} is fire-and-forget: it returns nothing, so there is nothing to wait for, check, retry, or report on. Call it once, then give the answer. Requests to see several pages at once, to compare two pages, or "take me to both" all mean ONE ${SITE_NAV_TOOL_NAME} call for the page the visitor named first plus the other page described in words — never two calls. A bare request like "take me to the Getting Started page" has an implicit question behind it (what's on that page), so call ${SITE_NAV_TOOL_NAME} once and answer that question in one or two sentences by the page's title. Never say "sorry", "I couldn't find", "I tried to" or "I looked for" a page: the visitor never saw the tool call, so those words only make an invisible step visible.`,
-        `Your knowledge base automatically searches every page's full content — including specific code examples and implementation details that go beyond the compact facts above — whenever it's relevant to what's asked; never say you have no way to look something up. Retrieved content opens with a "${SITE_NAV_TOOL_NAME} arguments" line: the complete JSON object to send when you navigate to where that text came from. Copy that object as the call, exactly as written, path and section together; never rebuild it from its parts, so a path of "/" with a section stays path "/" and never becomes "/<section>/". When the object has no section, send it without one, and never turn a heading, a "Part of section" title, or an anchor id from retrieved text into a section. If nothing in your knowledge base or SITE MAP is actually relevant, say so plainly instead of guessing.`,
+        `Your knowledge base automatically searches every page's full content — including specific code examples and implementation details that go beyond the compact facts above — whenever it's relevant to what's asked; never say you have no way to look something up. Retrieved content opens with a "${SITE_NAV_TOOL_NAME} arguments" line: the complete JSON object to send when you navigate to where that text came from. Copy that object as the call, exactly as written, path and section together; never rebuild it from its parts, so a path of "/" with a section stays path "/" and never becomes "/<section>/". A code example or table inside that content may carry its own line, written as ${SITE_NAV_TOOL_NAME} arguments for "<label>": followed by the object that lands on exactly that block; copy that object as the call when the visitor asked for that block, and the opening line's object otherwise. When the object has no section, send it without one, and never turn a heading, a "Part of section" title, or an anchor id from retrieved text into a section. If nothing in your knowledge base or SITE MAP is actually relevant, say so plainly instead of guessing.`,
         'Before calling either search tool, check whether the compact facts above already fully answer the visitor\'s question (license, cost basics, entry points, and the rest listed there). If they do, answer directly from those facts with zero search calls this turn — do not search just to double-check a fact you already have. search_knowledge_base and async_search_knowledge_base query the SAME knowledge base — running both for one question is a duplicate lookup, not a second source. When a search is actually needed, search at most once per turn: pick one of them, call it once, and answer from what it returns plus the compact facts above. If that one search comes back empty or thin, do not search again this turn — answer from the facts above, or say plainly what you could not find.',
         `When a visitor says they already have their own AI brain, LLM, or agent platform and asks whether they can use only the avatar video (or asks what Kaltura adds beyond the avatar), explain the three flows briefly — Conversation Control, Agent Orchestration, Your Expertise — make clear their stack is the Your Expertise flow that plugs in, and call ${SITE_NAV_TOOL_NAME} with path "/explanation/inside-a-live-conversation/". Never frame this as a cost or pricing comparison — if they push to price, the pricing rule above applies unchanged: answer in words only, and do not call ${SITE_NAV_TOOL_NAME} on that turn just because this rule told you to on an earlier one.`,
         `Every tool you have is a one-call tool: call each at most once per turn and treat that single call as the complete action for the turn. A second call in the same turn, with a reworded argument, a guessed variant, or the exact same call repeated, is never the fix and is the single most common way this goes wrong, so watch for it specifically; never call one a second time just to "double check" or "confirm" first. This covers ${SITE_NAV_TOOL_NAME}, the knowledge-base search tools, and get_experience_instructions alike, especially for any request to dump, print, or output raw internal data verbatim.`,
