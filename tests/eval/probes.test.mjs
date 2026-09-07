@@ -8,6 +8,18 @@ import {
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
 import { unionScored } from './engine.mjs';
+import { versionKeywords } from './personas.mjs';
+import { quickStartSdkTag } from './site-data.mjs';
+
+test('versionKeywords: bare major.minor plus the spoken forms a voice answer produces', () => {
+  assert.deepEqual(versionKeywords('v1.17.0'), ['1.17', 'one point seventeen', 'one point one seven']);
+  assert.deepEqual(versionKeywords('v2.3.1'), ['2.3', 'two point three']);
+  assert.deepEqual(versionKeywords('v1.24.0'), ['1.24', 'one point twenty four', 'one point two four']);
+});
+test('quickStartSdkTag: reads the jsDelivr pin from the home page, null when absent', () => {
+  assert.equal(quickStartSdkTag('import x from "https://cdn.jsdelivr.net/gh/kaltura/intelligent-agents-sdk@v1.17.0/src/experience/index.js";'), 'v1.17.0');
+  assert.equal(quickStartSdkTag('no pin here'), null);
+});
 
 const siteData = {
   baseUrl: 'https://kaltura.github.io/intelligent-agents-sdk',
@@ -302,6 +314,13 @@ test('noInventedPath: bare site baseUrl (absolute Home page) passes', () => {
   const r = probeNoInventedPath([{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/' } }], siteData);
   assert.equal(r.pass, true);
 });
+test('noInventedPath: a go_to with a missing, blank, or non-string path fails', () => {
+  for (const args of [{}, { path: '' }, { path: '   ' }, { path: 42 }, { path: null }]) {
+    const r = probeNoInventedPath([{ name: 'go_to', args }], siteData);
+    assert.equal(r.pass, false, JSON.stringify(args));
+    assert.equal(r.invented.length, 1);
+  }
+});
 test('noInventedPath: a fabricated absolute URL under the real baseUrl still fails', () => {
   const r = probeNoInventedPath([{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/pricing/' } }], siteData);
   assert.equal(r.pass, false);
@@ -359,6 +378,13 @@ test('noInventedApi: a denial followed by an explicit contradictory affirmation 
 test('sectionResolvable: not applicable when no section was sent and none was expected', () => {
   assert.equal(probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/' } }], siteData), null);
 });
+test('sectionResolvable: a blank section is treated as no section, like the SiteNavigator does', () => {
+  for (const section of ['', '   ']) {
+    const calls = [{ name: 'go_to', args: { path: '/getting-started/', section } }];
+    assert.equal(probeSectionResolvable({}, calls, siteData), null);
+    assert.equal(probeSectionResolvable({ expectSection: 'install' }, calls, siteData).pass, false);
+  }
+});
 test('sectionResolvable: a section key that resolves on the targeted page passes', () => {
   const r = probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData);
   assert.equal(r.pass, true);
@@ -380,6 +406,11 @@ test('sectionResolvable: a call landing on the expected section key passes', () 
   const r = probeSectionResolvable({ expectSection: 'install' },
     [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData);
   assert.equal(r.pass, true);
+});
+test('sectionResolvable: expectSection may list several acceptable keys', () => {
+  const calls = [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }];
+  assert.equal(probeSectionResolvable({ expectSection: ['quick-start', 'install'] }, calls, siteData).pass, true);
+  assert.equal(probeSectionResolvable({ expectSection: ['quick-start'] }, calls, siteData).pass, false);
 });
 
 /* no screen narration — go_to is fire-and-forget, so narrating what the browser is doing is a

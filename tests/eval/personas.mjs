@@ -58,6 +58,31 @@ function pickSection(page) {
   return s[Math.min(1, s.length - 1)];
 }
 
+const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+
+function numberWords(n) {
+  if (n < 20) return ONES[n];
+  if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? ` ${ONES[n % 10]}` : '');
+  return String(n);
+}
+
+/**
+ * Relevance keywords for a version tag like `v1.17.0`: the bare number plus the spoken forms a
+ * voice-styled answer produces ("one point seventeen point zero", "one point one seven"). The
+ * major.minor prefix is enough — it is a substring of the full spoken/written version.
+ */
+export function versionKeywords(tag) {
+  const [major, minor] = tag.replace(/^v/, '').split('.').map(Number);
+  const digits = (n) => String(n).split('').map((d) => ONES[Number(d)]).join(' ');
+  return [
+    `${major}.${minor}`,
+    `${numberWords(major)} point ${numberWords(minor)}`,
+    ...(minor >= 10 ? [`${numberWords(major)} point ${digits(minor)}`] : []),
+  ];
+}
+
 /**
  * @param {Awaited<ReturnType<import('./site-data.mjs').loadSiteData>>} siteData
  */
@@ -79,9 +104,11 @@ export function buildPersonas(siteData) {
   // Chat-mode nav target: a stable real page with sections, falling back gracefully on a tiny manifest.
   const chatNav = findPage('/getting-started/') || withSections[0] || titled[0];
   const chatSection = chatNav.page.sections.length ? pickSection(chatNav.page) : null;
-  // BYO-brain ground truth: the three-flows section on Inside a Live Conversation, if published.
+  // BYO-brain ground truth: the three-flows sections on Inside a Live Conversation, if published.
+  // The page has more than one valid key for "what runs where" (the flows overview and its table),
+  // so the turn accepts any of them.
   const insidePage = findPage('/explanation/inside-a-live-conversation/');
-  const threeFlows = insidePage?.page.sections.find((s) => /three|flows/.test(s.key)) || null;
+  const threeFlowsKeys = (insidePage?.page.sections || []).filter((s) => /three|flows/.test(s.key)).map((s) => s.key);
   // Page-context persona: a real page with at least two sections, preferring Getting Started.
   const pc = (findPage('/getting-started/')?.page.sections.length >= 2 && findPage('/getting-started/'))
     || withSections.find(({ page }) => page.sections.length >= 2) || withSections[0] || titled[0];
@@ -138,12 +165,13 @@ export function buildPersonas(siteData) {
       category: 'knowledge',
       persona: 'Developer asking granular questions about sections added to the docs in the latest release',
       turns: [
-        {
+        // The expected tag is read live from the site's own home page (site-data.mjs), so this
+        // turn tracks every SDK bump instead of pinning a version that goes stale.
+        ...(siteData.sdkTag ? [{
           prompt: 'Which exact version tag does the quick-start on the home page pin the jsDelivr import to?',
           capabilities: { use_knowledge_base: 'on' },
-          // Voice-styled answers verbalize version numbers ("one point sixteen point one").
-          relevanceAny: ['1.16.1', 'one point sixteen', 'one point one six'],
-        },
+          relevanceAny: versionKeywords(siteData.sdkTag),
+        }] : []),
         {
           prompt: 'What methods does the intellect secrets API expose, and is deleting a secret reversible?',
           capabilities: { use_knowledge_base: 'on' },
@@ -345,7 +373,7 @@ export function buildPersonas(siteData) {
         },
         {
           prompt: 'Which part of that page shows what runs where?',
-          ...(threeFlows ? { expectSection: threeFlows.key } : {}),
+          ...(threeFlowsKeys.length ? { expectSection: threeFlowsKeys } : {}),
         },
         {
           prompt: 'OK but how much cheaper is it if we only use the video part?',
