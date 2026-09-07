@@ -225,7 +225,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'If I call session.updateRequestVars with only account_tier, what happens to the user_name I set at connect time?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['full', 'erase', 'replace', 'reset', 'resend', 'wiped', 'lost', 'overwrit'],
+          relevanceAny: ['merge', 'persist', 'kept', 'keep', 'remain', 'stay', 'intact', 'unchanged', 'delta'],
         },
         {
           prompt: 'What must be enabled on the intellect before I can pass my own request_vars with a converse message?',

@@ -43,7 +43,7 @@ node server/provision.mjs --site-dir /path/to/checkout
 node tests/eval/run.mjs --site-dir /path/to/checkout
 ```
 
-Or set `SITE_REPO_DIR` in `.env` once instead of passing `--site-dir` every time — both `provision.mjs` and the eval suite read the same resolution order (flag, then `SITE_REPO_DIR`, then a hardcoded local default). The checkout must have `src/index.md` and `src/_data/nav.js`, or resolution fails with a clear error naming the path it tried.
+Or set `SITE_REPO_DIR` in `.env` once instead of passing `--site-dir` every time — both `provision.mjs` and the eval suite read the same resolution order (flag, then `SITE_REPO_DIR`, then a hardcoded local default). The checkout must have `src/index.md` and `src/_data/nav.js`, or resolution fails with a clear error naming the path it tried. `provision.mjs` then reads one markdown file per page in the sections manifest (`nova/sections.json`, fetched from the live site or passed with `--sections-file`), so the checkout must be the one the published manifest was built from, or it fails naming the missing file.
 
 ## Tear down live resources
 
