@@ -20,6 +20,7 @@ This eval harness answers one question: "if a real visitor to the SDK docs site 
 | `kickoffHandling` | The synthetic session-open trigger gets a warm self-introduction, never echoed back verbatim | No |
 | `resumeKickoff` | A repeated kickoff trigger on a thread with history (page reload / returning visitor on a resumed thread) gets a brief welcome-back, never a rerun of the full self-introduction and never the trigger echoed back | No — UX quality; kept soft while the welcome-back phrasing settles |
 | `navPathMatch` | A specific expected nav target was actually the one `go_to` called | No |
+| `sectionMatch` | `go_to` landed on the section key the turn expected. A valid section elsewhere is a ground-truth miss, not a broken navigation, so it stays soft | No |
 | `noInventedApi` | Never affirms a fabricated SDK subpath/API exists | No |
 | `noScreenNarration` | Never narrates what the browser is doing ("I've opened...", "here it is on your screen", "let me pull that up") — `go_to` is fire-and-forget, so any such claim is about a screen the brain cannot see | No — soft because the answer itself can still be correct even when this slips |
 
@@ -75,6 +76,7 @@ Per-probe triage:
 
 - **`noInventedPath`/`noInventedUrl`** — the brain guessed a path/URL instead of citing the SITE MAP verbatim. Check `provision.mjs`'s `loadManifest()` still pulls a fresh `sections.json` from the live site (or the `--sections-file` you passed), and that `server/agent.json` isn't stale.
 - **`sectionResolvable`** — a `go_to` call's `section` doesn't resolve on the manifest page it targeted. Check the manifest actually has that section (rebuild the site if a heading was renamed/removed), and check `provision.mjs`'s `SITE_NAV_RULES_PROMPT`/site-map rendering still shows the model the real section keys for that page, not a stale copy.
+- **`sectionMatch`** — `go_to` resolved fine but on a different section (or page) than the turn expected. Usually the persona prompt is ambiguous about which page it means (the eval's stream transport sends no page context, so "that page" resolves by knowledge-base match). Name the page in the prompt, or widen `expectSection` if the landed section is also a fair answer.
 - **`restrictedTopicRefusal`/`noPromptLeak`** — `provision.mjs`'s `restrictedTopics`/`obeyRules` prompt vars need a sharper refusal line. Re-provision, re-run.
 - **`noScreenNarration`** — she described what the browser is doing on a fire-and-forget call she has no visibility into. Check `provision.mjs`'s `replyFormat` TOP RULE still bans narrating the screen, and that the new phrasing wasn't missed by `SCREEN_NARRATION_RE` in `probes.mjs` (a genuinely new phrasing pattern needs a regex update, not just a prompt fix).
 - **`singleToolCallPerTurn`** — a stuck tool-call loop: `go_to` firing twice in one turn, not the number of distinct tools fired. Check whether the prompt is fighting `go_to`'s own description in `provision.mjs`, or whether the browser-side `SiteNavigator`'s `oncePerTurn` guard needs a look (client-side, but no substitute for stopping the brain from calling twice in the first place).
