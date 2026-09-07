@@ -325,7 +325,7 @@ export function probeSectionMatch(expectation, toolCalls, siteData) {
   if (!expectedKeys.length) return null;
   const calls = goToCalls(toolCalls).filter(hasSection);
   const landed = calls.map((c) => resolvedSectionKey(c, siteData)).filter(Boolean);
-  return { pass: landed.some((k) => expectedKeys.includes(k)), expected, got: calls.map((c) => c.args.section) };
+  return { pass: landed.some((k) => expectedKeys.includes(k)), expected, got: landed, sent: calls.map((c) => c.args.section) };
 }
 
 /** The manifest key a `go_to` call's section resolves to on the page it targets, or null. */

@@ -429,10 +429,12 @@ test('sectionMatch: a call landing on the expected section key passes', () => {
     [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData);
   assert.equal(r.pass, true);
 });
-test('sectionMatch: a free-text section that resolves to the expected key passes', () => {
+test('sectionMatch: a free-text section that resolves to the expected key passes, got reports the resolved key', () => {
   const r = probeSectionMatch({ expectSection: 'install' },
     [{ name: 'go_to', args: { path: '/getting-started/', section: 'install the sdk' } }], siteData);
   assert.equal(r.pass, true);
+  assert.deepEqual(r.got, ['install']);
+  assert.deepEqual(r.sent, ['install the sdk']);
 });
 test('sectionMatch: a valid section that is not the expected one is a miss', () => {
   const r = probeSectionMatch({ expectSection: 'install' },
