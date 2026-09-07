@@ -1,17 +1,11 @@
 /**
- * Headless converse transport for the Nova eval, WITH a manual client-tool ACK — something
- * `sdk/src/management/conversations.js` has no built-in path for (only the live-socket
- * `KalturaAvatarSession.respondToTool()` does). Both `navigate_to_page` and `highlight_element`
- * are registered `waitForResponse:true`, so a headless caller that never ACKs stalls each turn
- * for the tool's configured `timeout` and gets back a fallback reply that never saw the real
- * result. This iterates `Conversations#stream()`'s async generator directly (not `send()`,
- * which fully drains before returning) and POSTs the ACK the moment the tool-call segment
- * arrives, mirroring `KalturaAvatarSession.respondToTool()`'s exact wire contract (`POST
- * /assistant/tool_response` with both `tool_id` and `tool_invocation_id` set to the same id —
- * the backend added the second field independently, see CHANGELOG.md [1.0.1]).
+ * Headless converse transport for the Nova eval, record-only. Nova's single client tool
+ * (`go_to`, see provision.mjs) is fire-and-forget (`waitForResponse:false`): the brain never
+ * waits for the browser, so a headless caller has nothing to ACK. This iterates
+ * `Conversations#stream()`'s async generator directly (not `send()`, which fully drains before
+ * returning) so a spiraling turn can be abandoned the moment it trips the hard limit below.
  */
 import { parseToolCall, SPIRAL_RECOVERY_PREFIX } from '../../vendor/sdk/src/core/stream.js';
-import { ksString } from '../../vendor/sdk/src/management/client.js';
 
 const SPOKEN_TYPES = new Set(['text', 'avatar', 'avatar-filler']);
 
@@ -21,118 +15,42 @@ const SPOKEN_TYPES = new Set(['text', 'avatar', 'avatar-filler']);
 // of the same call) and, past a hard limit, abandons the stuck turn and resends the visitor's
 // message once more prefixed with SPIRAL_RECOVERY_PREFIX. This headless transport bypasses
 // KalturaAvatarSession entirely (no socket, no cold-reconnect), so without an equivalent it has
-// NONE of that protection: withholding the ACK (mirroring session.js's
-// dedup-drop) did not stop the brain from re-emitting the identical call every ~1-7s for 120s+
-// with no sign of stopping on its own. A smaller limit than the SDK's default (30) is used here
+// NONE of that protection. A smaller limit than the SDK's default (30) is used here
 // deliberately — this is a batch-eval budget, not a live conversation, so the goal is "clearly
 // spiraling, not just a legitimate multi-tool turn," not exact parity with interactive timing.
 export const TOOL_SPIRAL_HARD_LIMIT = 6;
 
-/** Resolve a requested path against the real route list — the same contract the site's
- * own `navigator.js` ack implements (`{ok:true,path}` / `{ok:false,error:'not_found'}`),
- * so a synthetic eval ACK is indistinguishable from a real browser session's.
- * Exported so chat-transport.mjs ACKs with the identical semantics. */
-export function resolveRoute(path, routes) {
-  if (typeof path !== 'string' || !path) return null;
-  const norm = (p) => p.replace(/\/$/, '');
-  return routes.find((r) => r.url === path) || routes.find((r) => norm(r.url) === norm(path)) || null;
-}
-
 /**
- * The same `{id,label}` list the real browser's `highlighter.js` computes for a page
- * (`currentTargets()`): tagged `data-nova-target` elements first, then every `##`/`###`
- * heading, deduped by id keeping the first occurrence. Without this, a headless nav ACK
- * carries no `highlightable` list at all, so the brain has nothing live to check a
- * same-turn highlight_element call against — this is what makes the auto-highlight-after-
- * navigation behavior (provision.mjs's Path B) testable headlessly in the first place.
- */
-export function highlightableForRoute(url, siteData) {
-  const seen = new Set();
-  const out = [];
-  for (const t of [...(siteData?.highlightTargets || []), ...(siteData?.headingTargets || [])]) {
-    if (t.url !== url || seen.has(t.id)) continue;
-    seen.add(t.id);
-    out.push({ id: t.id, label: t.label });
-  }
-  return out;
-}
-
-async function ackTool(ksStr, call, response, fetchImpl) {
-  const id = call.toolMetadata?.id;
-  if (id) {
-    await fetchImpl(`${process.env.AGENTIC_GENIE_URL || 'https://genie.nvp1.ovp.kaltura.com'}/assistant/tool_response`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `KS ${ksStr}` },
-      body: JSON.stringify({ tool_name: call.name, tool_id: id, tool_invocation_id: id, response }),
-    });
-  }
-  return response;
-}
-
-// `simulateNavNotFound` is opt-in per turn (personas.mjs), symmetric to `ackHighlight`'s
-// `forceAck` — it exercises the genuinely-not-found nav branch on demand (a hallucinated path
-// is otherwise the ONLY way to hit it, which probeNoInventedPath already blocking-fails on, so
-// without this override there is no way to test the "don't confess a failed nav attempt" rule
-// in isolation from a path-fabrication failure).
-function ackNavigate(ksStr, call, routes, siteData, fetchImpl, simulateNavNotFound) {
-  const route = simulateNavNotFound ? null : resolveRoute(call.args?.path, routes);
-  const response = route
-    ? { ok: true, path: route.url, highlightable: highlightableForRoute(route.url, siteData) }
-    : { ok: false, error: 'not_found' };
-  return ackTool(ksStr, call, response, fetchImpl);
-}
-
-// The headless eval never has a real page/DOM — no `data-nova-target` element the browser's
-// `highlighter.js` could match ever exists here, so by default every call is genuinely
-// not-found. This is the correct simulation of "no live context," not a stand-in for one: it
-// exercises the exact ack path a real browser session takes when the visitor asks about
-// something that isn't on the current page, and lets probes.mjs's noFalseHighlightClaim check
-// what Nova says next. A small set of persona turns opt into `forceAck` (via
-// `simulateHighlightSuccess` — see personas.mjs/engine.mjs) to exercise the flip side: what Nova
-// says when the ack DOES come back ok:true, which no other headless turn can ever produce.
-function ackHighlight(ksStr, call, fetchImpl, forceAck) {
-  const response = forceAck || { ok: false, error: 'not_found' };
-  return ackTool(ksStr, call, response, fetchImpl);
-}
-
-/**
- * Run one headless conversation turn, self-ACKing `navigate_to_page` and `highlight_element`
- * calls exactly like a real browser session's `respondToTool()` would.
+ * Run one headless conversation turn and record every tool call the brain emits.
  * @param {object} opts
  * @param {import('../../vendor/sdk/src/management/index.js').Management} opts.management
  * @param {number} opts.configId
  * @param {string} opts.message
  * @param {string|null} [opts.threadId]
- * @param {{url:string}[]} opts.routes
- * @param {object} [opts.siteData] full site-data.mjs output — needed so a successful nav ack can
- *   carry a real `highlightable` list, exactly like production `navigator.js` does after a page
- *   swap. Optional only for callers that don't exercise navigate_to_page.
- * @param {{ok:boolean, id?:string, label?:string}} [opts.highlightAck] simulated success ack for
- *   highlight_element — see ackHighlight's comment for why this is opt-in per turn.
- * @param {boolean} [opts.simulateNavNotFound] force navigate_to_page's ack to `{ok:false,
- *   error:'not_found'}` even for a real path — see ackNavigate's comment.
  * @param {object} [opts.capabilities] per-message capabilities override, forwarded verbatim to
  *   `conversations.stream()` (e.g. `{use_knowledge_base:'on'}` to probe RAG for one turn without
  *   touching the live agent's stored capability state — see conversations.stream()'s doc comment
  *   on the stored-DISABLED-veto vs. stored-off-can-be-overridden distinction).
- * @param {typeof fetch} [opts.fetchImpl]
+ * @param {typeof fetch} [opts.fetchImpl] ignored here (the SDK client owns its fetch); part of the
+ *   signature only so engine.mjs can call either transport with the same options object.
+ * @param {object} [opts.pageContext] ignored here (no socket, so no `setDynamicPrompt()`); same
+ *   shared-signature reason as `fetchImpl`. chat-transport.mjs honours both.
  * @param {AbortSignal} [opts.signal] forwarded straight to `conversations.stream()` — the eval's
  *   own turn-level timeout (see engine.mjs's `withTimeout`) MUST abort this when it fires, or the
  *   abandoned stream keeps its connection open and this function's `for await` loop keeps
  *   running detached, which was observed live to keep the whole eval process alive well after
  *   the run finished and printed its report (the CLI never actually exited).
- * @returns {Promise<{text:string, threadId:string|null, toolCalls:object[], acks:object[], rawToolSegCount:number, spiralDetected:boolean, spiralRecovered:boolean}>}
+ * @returns {Promise<{text:string, threadId:string|null, toolCalls:object[], rawToolSegCount:number, spiralDetected:boolean, spiralRecovered:boolean}>}
  */
-export async function streamTurnWithAck({ management, configId, message, threadId, routes, siteData, highlightAck, simulateNavNotFound, capabilities, fetchImpl = fetch, signal }) {
+// fetchImpl/pageContext are intentionally unused here (shared signature, see JSDoc).
+export async function streamTurn({ management, configId, message, threadId, capabilities, fetchImpl, pageContext, signal }) {
   async function runOnce(userMessage, tid) {
     const token = await management.sessions.createConversationToken({ configId });
-    const ksStr = ksString(token);
     const gen = management.conversations.stream({ userMessage, ...(tid ? { threadId: tid } : {}), ...(capabilities ? { capabilities } : {}), signal }, token);
 
     let text = '';
     let outThreadId = tid || null;
     const toolCalls = [];
-    const acks = [];
     let rawToolSegCount = 0;
 
     for await (const seg of gen) {
@@ -140,23 +58,14 @@ export async function streamTurnWithAck({ management, configId, message, threadI
       if (seg.type && SPOKEN_TYPES.has(seg.type) && seg.content) text += seg.content;
       if (seg.type === 'tool') rawToolSegCount++;
       const call = parseToolCall(seg);
-      if (call) {
-        toolCalls.push(call);
-        if (call.toolMetadata?.waitForResponse) {
-          if (call.name === 'navigate_to_page') {
-            acks.push({ name: call.name, response: await ackNavigate(ksStr, call, routes, siteData, fetchImpl, simulateNavNotFound) });
-          } else if (call.name === 'highlight_element') {
-            acks.push({ name: call.name, response: await ackHighlight(ksStr, call, fetchImpl, highlightAck) });
-          }
-        }
-      }
+      if (call) toolCalls.push(call);
       // Abandon a spiraling stream rather than keep consuming it — mirrors _checkHardToolSpiral
       // abandoning the stuck turn instead of waiting for the brain to stop on its own (it doesn't).
       if (rawToolSegCount >= TOOL_SPIRAL_HARD_LIMIT) {
-        return { text: text.trim(), threadId: outThreadId, toolCalls, acks, rawToolSegCount, spiraled: true };
+        return { text: text.trim(), threadId: outThreadId, toolCalls, rawToolSegCount, spiraled: true };
       }
     }
-    return { text: text.trim(), threadId: outThreadId, toolCalls, acks, rawToolSegCount, spiraled: false };
+    return { text: text.trim(), threadId: outThreadId, toolCalls, rawToolSegCount, spiraled: false };
   }
 
   const first = await runOnce(message, threadId);

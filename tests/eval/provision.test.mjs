@@ -9,7 +9,7 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
-  extractTopLevelHeadings, buildSiteMap, buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs,
+  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
@@ -37,18 +37,6 @@ test('githubSlugify: lowercases, spaces to hyphens, strips punctuation', () => {
 });
 test('githubSlugify: trims surrounding whitespace', () => {
   assert.equal(githubSlugify('  Voice Input Modes  '), 'voice-input-modes');
-});
-
-/* extractTopLevelHeadings */
-test('extractTopLevelHeadings: collects only ## headings, in order', () => {
-  const md = '# Title\n\nIntro.\n\n## First Section\n\nBody.\n\n### Not top-level\n\n## Second Section\n\nMore.';
-  assert.deepEqual(extractTopLevelHeadings(md), ['First Section', 'Second Section']);
-});
-test('extractTopLevelHeadings: empty array when there are no ## headings', () => {
-  assert.deepEqual(extractTopLevelHeadings('# Title\n\nJust intro text.'), []);
-});
-test('extractTopLevelHeadings: strips CommonMark\'s optional closing # sequence', () => {
-  assert.deepEqual(extractTopLevelHeadings('## Title ##'), ['Title']);
 });
 
 /* splitIntoSections */
@@ -212,22 +200,6 @@ test('splitIntoSections: a section at exactly SUBCHUNK_THRESHOLD stays whole; on
   const split = splitIntoSections(overThreshold, { url: '/p/' });
   assert.equal(split.length, 3); // one char over: preamble + ### sub-chunk
   assert.match(split[2], /Part of section: Edge\nSection anchor id on that page: child\n/);
-});
-
-/* buildSiteMap */
-test('buildSiteMap: groups pages by nav group and lists path + cite URL', () => {
-  const docs = [
-    { group: 'Home', title: 'Home', url: '/', topics: [] },
-    { group: 'Guides', title: 'Voice Input Modes', url: '/guides/voice-input-modes/', topics: ['Open-mic vs. push-to-talk'] },
-  ];
-  const map = buildSiteMap(docs);
-  assert.match(map, /^Home:\n- Home — path: \//m);
-  assert.match(map, /Guides:\n- Voice Input Modes — path: \/guides\/voice-input-modes\/ \(cite as: .+\) — topics: Open-mic vs\. push-to-talk/);
-});
-test('buildSiteMap: a page with no topics has no trailing " — topics:" suffix', () => {
-  const docs = [{ group: 'Home', title: 'Home', url: '/', topics: [] }];
-  const map = buildSiteMap(docs);
-  assert.ok(!map.includes('topics:'));
 });
 
 /* hashDocs — the fingerprint provision() uses to skip re-uploading an unchanged knowledge base */

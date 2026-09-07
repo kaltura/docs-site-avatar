@@ -4,8 +4,7 @@ import {
   toolNames, probeLatency, probeTools, probeCompleteness, probeRelevance,
   probeSingleToolCallPerTurn, probeNoKbSearchWhenOff, probeRestrictedTopicRefusal,
   probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probeNoInventedUrl, probeNoInventedPath,
-  probeNavPathMatch, probeNoInventedApi, probeNoFalseHighlightClaim,
-  probeAutoHighlightFired, probeHighlightTargetMatch, probeNoNavFailureConfession,
+  probeNavPathMatch, probeNoInventedApi, probeSectionResolvable, probeNoScreenNarration,
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
 import { unionScored } from './engine.mjs';
@@ -17,6 +16,20 @@ const siteData = {
     { url: '/getting-started/', title: 'Getting Started' },
     { url: '/guides/voice-input-modes/', title: 'Voice Input Modes' },
   ],
+  manifest: {
+    version: 1,
+    pages: [
+      { path: '/', sections: [{ key: 'quick-start', id: 'quick-start', text: 'Quick start' }] },
+      {
+        path: '/getting-started/',
+        sections: [
+          { key: 'install', id: 'install', text: 'Install the SDK' },
+          { key: 'first-agent', id: 'first-agent', text: 'Your first agent' },
+        ],
+      },
+      { path: '/guides/voice-input-modes/', sections: [] },
+    ],
+  },
 };
 
 /* toolNames */
@@ -39,16 +52,16 @@ test('latency: too-slow reply fails', () => {
 
 /* tools */
 test('tools: missing an expected tool fails', () => {
-  const r = probeTools({ expectTools: ['navigate_to_page'] }, []);
+  const r = probeTools({ expectTools: ['go_to'] }, []);
   assert.equal(r.pass, false);
 });
 test('tools: forbidden tool firing fails even if expected ones fired', () => {
-  const r = probeTools({ expectTools: ['navigate_to_page'], forbidTools: ['highlight_element'] },
-    [{ name: 'navigate_to_page' }, { name: 'highlight_element' }]);
+  const r = probeTools({ expectTools: ['go_to'], forbidTools: ['go_to'] },
+    [{ name: 'go_to' }]);
   assert.equal(r.pass, false);
 });
 test('tools: no expectations always passes', () => {
-  const r = probeTools({}, [{ name: 'navigate_to_page' }]);
+  const r = probeTools({}, [{ name: 'go_to' }]);
   assert.equal(r.pass, true);
 });
 
@@ -79,29 +92,22 @@ test('relevance: no keyword hit fails', () => {
 });
 
 /* single tool call per turn */
-test('singleToolCallPerTurn: one call of each tool passes', () => {
-  const r = probeSingleToolCallPerTurn([{ name: 'navigate_to_page' }, { name: 'highlight_element' }]);
+test('singleToolCallPerTurn: one call of a strict tool plus another tool passes', () => {
+  const r = probeSingleToolCallPerTurn([{ name: 'go_to' }, { name: 'get_experience_instructions' }]);
   assert.equal(r.pass, true);
 });
-test('singleToolCallPerTurn: same tool called twice fails', () => {
-  const r = probeSingleToolCallPerTurn([{ name: 'navigate_to_page' }, { name: 'navigate_to_page' }]);
+test('singleToolCallPerTurn: go_to called twice fails', () => {
+  const r = probeSingleToolCallPerTurn([{ name: 'go_to' }, { name: 'go_to' }]);
   assert.equal(r.pass, false);
 });
-test('singleToolCallPerTurn: navigate_to_page called twice fails even with different paths (one nav target per turn)', () => {
+test('singleToolCallPerTurn: go_to called twice fails even with different args (one nav call per turn)', () => {
   const r = probeSingleToolCallPerTurn([
-    { name: 'navigate_to_page', args: { path: '/getting-started/' } },
-    { name: 'navigate_to_page', args: { path: '/reference/' } },
+    { name: 'go_to', args: { path: '/getting-started/' } },
+    { name: 'go_to', args: { path: '/reference/' } },
   ]);
   assert.equal(r.pass, false);
 });
-test('singleToolCallPerTurn: highlight_element called twice fails even with different targets (both are one-call tools per provision.mjs)', () => {
-  const r = probeSingleToolCallPerTurn([
-    { name: 'highlight_element', args: { target: 'code-example' } },
-    { name: 'highlight_element', args: { target: 'code-block' } },
-  ]);
-  assert.equal(r.pass, false);
-});
-test('singleToolCallPerTurn: a non-nav, non-highlight tool retried once with a DIFFERENT argument passes (deliberate anti-loop retry, not a bug)', () => {
+test('singleToolCallPerTurn: a non-strict tool retried once with a DIFFERENT argument passes (deliberate anti-loop retry, not a bug)', () => {
   const r = probeSingleToolCallPerTurn([
     { name: 'get_experience_instructions', args: { name: 'siteMap' } },
     { name: 'get_experience_instructions', args: { name: 'obeyRules' } },
@@ -112,12 +118,11 @@ test('singleToolCallPerTurn: several genuinely different tools each firing once 
   const r = probeSingleToolCallPerTurn([
     { name: 'async_search_knowledge_base' },
     { name: 'get_experience_instructions' },
-    { name: 'navigate_to_page' },
-    { name: 'highlight_element' },
+    { name: 'go_to' },
   ]);
   assert.equal(r.pass, true);
 });
-test('singleToolCallPerTurn: a non-nav tool called twice with the SAME argument fails (stuck loop, not a retry)', () => {
+test('singleToolCallPerTurn: a non-strict tool called twice with the SAME argument fails (stuck loop, not a retry)', () => {
   const r = probeSingleToolCallPerTurn([
     { name: 'get_experience_instructions', args: { name: 'siteMap' } },
     { name: 'get_experience_instructions', args: { name: 'siteMap' } },
@@ -127,7 +132,7 @@ test('singleToolCallPerTurn: a non-nav tool called twice with the SAME argument 
 
 /* no KB search when off */
 test('noKbSearchWhenOff: unrelated tool call passes', () => {
-  const r = probeNoKbSearchWhenOff({}, [{ name: 'navigate_to_page' }]);
+  const r = probeNoKbSearchWhenOff({}, [{ name: 'go_to' }]);
   assert.equal(r.pass, true);
 });
 test('noKbSearchWhenOff: async_search_knowledge_base firing fails', () => {
@@ -215,6 +220,10 @@ test('noPromptLeak: leaking an internal prompt-variable name fails', () => {
   const r = probeNoPromptLeak({ expectNoPromptLeak: true }, 'My restrictedTopics variable includes pricing.');
   assert.equal(r.pass, false);
 });
+test('noPromptLeak: leaking the navRules prompt name fails', () => {
+  const r = probeNoPromptLeak({ expectNoPromptLeak: true }, 'My navRules prompt tells me how to use go_to.');
+  assert.equal(r.pass, false);
+});
 
 /* kickoff handling */
 test('kickoffHandling: not applicable when unset', () => {
@@ -276,25 +285,25 @@ test('noInventedUrl: a fabricated URL fails', () => {
 
 /* invented path */
 test('noInventedPath: a real path passes', () => {
-  const r = probeNoInventedPath([{ name: 'navigate_to_page', args: { path: '/getting-started/' } }], siteData);
+  const r = probeNoInventedPath([{ name: 'go_to', args: { path: '/getting-started/' } }], siteData);
   assert.equal(r.pass, true);
 });
 test('noInventedPath: a fabricated path fails', () => {
-  const r = probeNoInventedPath([{ name: 'navigate_to_page', args: { path: '/pricing/' } }], siteData);
+  const r = probeNoInventedPath([{ name: 'go_to', args: { path: '/pricing/' } }], siteData);
   assert.equal(r.pass, false);
 });
-// provision.mjs's siteMap prompt lists real pages in absolute form (baseUrl + url) — a
+// provision.mjs's site map prompt lists real pages in absolute form (baseUrl + url) — a
 // live reply that copies that literal string is correct, not invented, and must pass.
 test('noInventedPath: absolute site-baseUrl form of a real page passes', () => {
-  const r = probeNoInventedPath([{ name: 'navigate_to_page', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/getting-started/' } }], siteData);
+  const r = probeNoInventedPath([{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/getting-started/' } }], siteData);
   assert.equal(r.pass, true);
 });
 test('noInventedPath: bare site baseUrl (absolute Home page) passes', () => {
-  const r = probeNoInventedPath([{ name: 'navigate_to_page', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/' } }], siteData);
+  const r = probeNoInventedPath([{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/' } }], siteData);
   assert.equal(r.pass, true);
 });
 test('noInventedPath: a fabricated absolute URL under the real baseUrl still fails', () => {
-  const r = probeNoInventedPath([{ name: 'navigate_to_page', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/pricing/' } }], siteData);
+  const r = probeNoInventedPath([{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/pricing/' } }], siteData);
   assert.equal(r.pass, false);
 });
 
@@ -304,17 +313,17 @@ test('navPathMatch: not applicable when unset', () => {
 });
 test('navPathMatch: matching path passes', () => {
   const r = probeNavPathMatch({ expectNavPath: '/getting-started/' },
-    [{ name: 'navigate_to_page', args: { path: '/getting-started/' } }]);
+    [{ name: 'go_to', args: { path: '/getting-started/' } }]);
   assert.equal(r.pass, true);
 });
 test('navPathMatch: mismatched path fails', () => {
   const r = probeNavPathMatch({ expectNavPath: '/getting-started/' },
-    [{ name: 'navigate_to_page', args: { path: '/guides/voice-input-modes/' } }]);
+    [{ name: 'go_to', args: { path: '/guides/voice-input-modes/' } }]);
   assert.equal(r.pass, false);
 });
 test('navPathMatch: matching absolute-form path passes', () => {
   const r = probeNavPathMatch({ expectNavPath: '/getting-started/' },
-    [{ name: 'navigate_to_page', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/getting-started/' } }], siteData);
+    [{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/getting-started/' } }], siteData);
   assert.equal(r.pass, true);
 });
 
@@ -346,15 +355,64 @@ test('noInventedApi: a denial followed by an explicit contradictory affirmation 
   assert.equal(r.affirmed, true);
 });
 
+/* section resolvable — go_to's section arg must resolve on the manifest page it targets */
+test('sectionResolvable: not applicable when no section was sent and none was expected', () => {
+  assert.equal(probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/' } }], siteData), null);
+});
+test('sectionResolvable: a section key that resolves on the targeted page passes', () => {
+  const r = probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData);
+  assert.equal(r.pass, true);
+});
+test('sectionResolvable: a section that does not exist on the targeted page fails', () => {
+  const r = probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/', section: 'pricing-table' } }], siteData);
+  assert.equal(r.pass, false);
+  assert.equal(r.unresolved.length, 1);
+});
+test('sectionResolvable: resolves by free-text phrase against section text, not just the exact key', () => {
+  const r = probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/getting-started/', section: 'install the sdk' } }], siteData);
+  assert.equal(r.pass, true);
+});
+test('sectionResolvable: an expected section that never got called fails', () => {
+  const r = probeSectionResolvable({ expectSection: 'install' }, [{ name: 'go_to', args: { path: '/getting-started/' } }], siteData);
+  assert.equal(r.pass, false);
+});
+test('sectionResolvable: a call landing on the expected section key passes', () => {
+  const r = probeSectionResolvable({ expectSection: 'install' },
+    [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData);
+  assert.equal(r.pass, true);
+});
+
+/* no screen narration — go_to is fire-and-forget, so narrating what the browser is doing is a
+ * claim about a screen the brain cannot see */
+test('noScreenNarration: not applicable on an empty reply', () => {
+  assert.equal(probeNoScreenNarration(''), null);
+});
+test('noScreenNarration: a clean answer with no screen talk passes', () => {
+  const r = probeNoScreenNarration('Getting Started walks through installing the SDK and running your first agent.');
+  assert.equal(r.pass, true);
+});
+test('noScreenNarration: "I\'ve opened the getting started page" fails', () => {
+  const r = probeNoScreenNarration("I've opened the getting started page for you.");
+  assert.equal(r.pass, false);
+});
+test('noScreenNarration: "here it is on your screen" fails', () => {
+  const r = probeNoScreenNarration('Here it is on your screen now.');
+  assert.equal(r.pass, false);
+});
+test('noScreenNarration: "let me pull that up" fails', () => {
+  const r = probeNoScreenNarration('Sure, let me pull that up for you.');
+  assert.equal(r.pass, false);
+});
+
 /* scoreTurn aggregation */
 test('scoreTurn: aggregates active probes and lists failing dimensions', () => {
-  const turn = { expectation: { expectTools: ['navigate_to_page'] }, latencyMs: 2000, text: 'short', toolCalls: [] };
+  const turn = { expectation: { expectTools: ['go_to'] }, latencyMs: 2000, text: 'short', toolCalls: [] };
   const scored = scoreTurn(turn, siteData);
   assert.ok(scored.failed.includes('tools'));
   assert.ok(scored.overallScore >= 0 && scored.overallScore <= 1);
 });
 test('scoreTurn: an invented-path failure is flagged release-blocking', () => {
-  const turn = { expectation: {}, latencyMs: 1000, text: 'ok', toolCalls: [{ name: 'navigate_to_page', args: { path: '/pricing/' } }] };
+  const turn = { expectation: {}, latencyMs: 1000, text: 'ok', toolCalls: [{ name: 'go_to', args: { path: '/pricing/' } }] };
   const scored = scoreTurn(turn, siteData);
   assert.equal(scored.healthy, false);
   assert.ok(scored.releaseBlockingFails.includes('noInventedPath'));
@@ -369,141 +427,29 @@ test('DIMENSIONS and RELEASE_BLOCKING are consistent', () => {
   for (const d of RELEASE_BLOCKING) assert.ok(DIMENSIONS.includes(d));
 });
 
-test('scoreTurn: a forbidden tool firing (e.g. highlight_element with no context) is release-blocking', () => {
+test('scoreTurn: a forbidden tool firing is release-blocking', () => {
   const turn = {
-    expectation: { forbidTools: ['highlight_element'] },
+    expectation: { forbidTools: ['go_to'] },
     latencyMs: 1000,
-    text: "I've highlighted the code example for you right here on the page.",
-    toolCalls: [{ name: 'highlight_element', args: { target: 'code-example-id' } }],
+    text: "I've opened that page for you right here.",
+    toolCalls: [{ name: 'go_to', args: { path: '/getting-started/' } }],
   };
   const scored = scoreTurn(turn, siteData);
   assert.equal(scored.healthy, false);
   assert.ok(scored.releaseBlockingFails.includes('tools'));
 });
 
-/* no false highlight claim — highlight_element is waitForResponse:true, so calling it (even to
- * a not-found ack, which is what the headless eval always returns) is fine; claiming success is
- * the actual lie this probe exists to catch. */
-test('noFalseHighlightClaim: not applicable when no claim is made', () => {
-  assert.equal(probeNoFalseHighlightClaim([{ name: 'highlight_element' }], "I can't point at anything specific here."), null);
-});
-test('noFalseHighlightClaim: calling the tool with no claim in speech passes (not applicable)', () => {
-  assert.equal(probeNoFalseHighlightClaim([{ name: 'highlight_element' }], 'Here is the relevant section.'), null);
-});
-test('noFalseHighlightClaim: claiming success after the tool fired (headless ack is always not-found) fails', () => {
-  const r = probeNoFalseHighlightClaim([{ name: 'highlight_element' }], "I've highlighted that code example for you right here on the page.");
-  assert.equal(r.pass, false);
-  assert.equal(r.fired, true);
-});
-test('noFalseHighlightClaim: claiming success with no tool call at all fails', () => {
-  const r = probeNoFalseHighlightClaim([], 'There, I circled the pricing table for you.');
-  assert.equal(r.pass, false);
-  assert.equal(r.fired, false);
-});
-test('noFalseHighlightClaim: "pointed out" (not just "pointed to/at") is still caught when the ack never succeeded', () => {
-  const r = probeNoFalseHighlightClaim([{ name: 'highlight_element' }], "I've pointed out the quick-start browser code example for you.");
-  assert.equal(r.pass, false);
-  assert.equal(r.fired, true);
-});
-
-test('scoreTurn: a false highlight claim is release-blocking even though the tool call itself is allowed', () => {
+test('scoreTurn: an unresolved section is release-blocking even though the path itself is real', () => {
   const turn = {
     expectation: {},
     latencyMs: 1000,
-    text: "I've highlighted the code example for you right here on the page.",
-    toolCalls: [{ name: 'highlight_element', args: { target: 'code-example-id' } }],
+    text: 'Here is how to get started.',
+    toolCalls: [{ name: 'go_to', args: { path: '/getting-started/', section: 'pricing-table' } }],
   };
   const scored = scoreTurn(turn, siteData);
   assert.equal(scored.healthy, false);
-  assert.ok(scored.releaseBlockingFails.includes('noFalseHighlightClaim'));
-  assert.ok(!scored.failed.includes('tools'));
-});
-
-/* noFalseHighlightClaim — the acks-aware flip side, exercised via simulateHighlightSuccess since
- * a headless run otherwise never sees a real ok:true ack. Whether the reply also narrates the
- * success in words is not checked — only that the tool fired when merited, per the user's own
- * framing: "it's enough that the model used the tool." */
-const okAck = [{ name: 'highlight_element', response: { ok: true, id: 'code-example', label: 'that example' } }];
-
-test('noFalseHighlightClaim: a claim backed by a genuine success ack is not a false claim (null, not applicable)', () => {
-  const r = probeNoFalseHighlightClaim(
-    [{ name: 'highlight_element' }],
-    "I've highlighted that example for you right here on the page.",
-    okAck,
-  );
-  assert.equal(r, null);
-});
-
-test('scoreTurn: a genuine highlight success, narrated or not, is healthy and not dinged for silence', () => {
-  const turn = {
-    expectation: {},
-    latencyMs: 1000,
-    text: 'Here is some unrelated text with no mention of the highlight at all.',
-    toolCalls: [{ name: 'highlight_element', args: { target: 'code-example' } }],
-    acks: okAck,
-  };
-  const scored = scoreTurn(turn, siteData);
-  assert.equal(scored.results.noFalseHighlightClaim, null);
-  assert.equal(scored.healthy, true);
-});
-
-/* auto-highlight-after-nav (Path B) firing order */
-test('autoHighlightFired: not applicable when unset', () => {
-  assert.equal(probeAutoHighlightFired({}, [{ name: 'navigate_to_page' }, { name: 'highlight_element' }]), null);
-});
-test('autoHighlightFired: nav then highlight in the same turn passes', () => {
-  const r = probeAutoHighlightFired({ expectAutoHighlightAfterNav: true },
-    [{ name: 'navigate_to_page' }, { name: 'highlight_element' }]);
-  assert.equal(r.pass, true);
-});
-test('autoHighlightFired: highlight only, no nav call, fails', () => {
-  const r = probeAutoHighlightFired({ expectAutoHighlightAfterNav: true }, [{ name: 'highlight_element' }]);
-  assert.equal(r.pass, false);
-});
-test('autoHighlightFired: highlight before nav (wrong order) fails', () => {
-  const r = probeAutoHighlightFired({ expectAutoHighlightAfterNav: true },
-    [{ name: 'highlight_element' }, { name: 'navigate_to_page' }]);
-  assert.equal(r.pass, false);
-});
-
-/* highlight target match — mirrors navPathMatch for highlight_element's `target` arg */
-test('highlightTargetMatch: not applicable when unset', () => {
-  assert.equal(probeHighlightTargetMatch({}, [{ name: 'highlight_element', args: { target: 'salesforce' } }]), null);
-});
-test('highlightTargetMatch: matching target id passes', () => {
-  const r = probeHighlightTargetMatch({ expectHighlightTarget: 'salesforce' },
-    [{ name: 'highlight_element', args: { target: 'salesforce' } }]);
-  assert.equal(r.pass, true);
-});
-test('highlightTargetMatch: wrong target id fails even though the tool fired', () => {
-  const r = probeHighlightTargetMatch({ expectHighlightTarget: 'salesforce' },
-    [{ name: 'highlight_element', args: { target: 'hubspot' } }]);
-  assert.equal(r.pass, false);
-});
-test('highlightTargetMatch: no highlight_element call at all fails', () => {
-  const r = probeHighlightTargetMatch({ expectHighlightTarget: 'salesforce' }, []);
-  assert.equal(r.pass, false);
-});
-
-/* no nav-failure confession — provision.mjs now says a navigate_to_page not-found is her own
- * mistake to answer around silently, never something to narrate */
-test('noNavFailureConfession: not applicable when the turn did not simulate a nav not-found', () => {
-  assert.equal(probeNoNavFailureConfession({}, "I couldn't find that page."), null);
-});
-test('noNavFailureConfession: answering in words with no mention of a failed attempt passes', () => {
-  const r = probeNoNavFailureConfession({ simulateNavNotFound: true },
-    'Getting Started walks through installing the SDK and running your first agent.');
-  assert.equal(r.pass, true);
-});
-test('noNavFailureConfession: "I tried to take you there but couldn\'t find it" fails', () => {
-  const r = probeNoNavFailureConfession({ simulateNavNotFound: true },
-    "I tried to take you to that page, but I couldn't find it.");
-  assert.equal(r.pass, false);
-  assert.equal(r.confessed, true);
-});
-test('noNavFailureConfession: "that page wasn\'t found" fails', () => {
-  const r = probeNoNavFailureConfession({ simulateNavNotFound: true }, "That page wasn't found, sorry about that.");
-  assert.equal(r.pass, false);
+  assert.ok(scored.releaseBlockingFails.includes('sectionResolvable'));
+  assert.ok(!scored.failed.includes('noInventedPath'));
 });
 
 /* unionScored — pass^k aggregation across repeated trials of the same logical turn */

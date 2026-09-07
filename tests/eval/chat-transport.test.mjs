@@ -3,23 +3,19 @@
  * No live agent, no credentials: fetch is injected (KalturaChatSession supports
  * this natively), so these verify the wire contract this transport drives —
  * converse body shape (threadId / capabilities / page_context request var),
- * mid-stream tool ACKs through the session's own respondToTool(), and the
- * streamTurnWithAck-compatible return shape engine.mjs scores.
+ * the fire-and-forget `go_to` tool call the SiteNavigator would receive, and
+ * the streamTurn-compatible return shape engine.mjs scores.
  *
  * Run: node --test tests/eval/chat-transport.test.mjs   (part of `npm run test:eval:unit`)
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chatTurnWithAck } from './chat-transport.mjs';
+import { chatTurn } from './chat-transport.mjs';
 import { TOOL_SPIRAL_HARD_LIMIT } from './transport.mjs';
 
 // Not a real KS — inspectKs() treats any non-djJ8 string as opaque and moves on.
 const FAKE_TOKEN = 'fake-conversation-ks-for-unit-tests';
 const management = { sessions: { createConversationToken: async () => FAKE_TOKEN } };
-const ROUTES = [
-  { url: '/', title: 'Home' },
-  { url: '/getting-started/', title: 'Getting Started' },
-];
 
 /** One-chunk NDJSON body stream, the shape parseConverseStream() consumes. */
 function ndjsonBody(segs) {
@@ -40,50 +36,36 @@ function fakeFetch(segs) {
     if (url.endsWith('/assistant/converse')) {
       return { ok: true, status: 200, headers: { get: () => '' }, body: ndjsonBody(segs) };
     }
-    if (url.endsWith('/assistant/tool_response')) {
-      return { ok: true, status: 200, json: async () => ({}), text: async () => '{}' };
-    }
     throw new Error(`unexpected fetch: ${url}`);
   };
   return { impl, calls };
 }
 
-test('collects text, ACKs a waitForResponse nav tool via respondToTool, returns the stream shape', async () => {
-  const { impl, calls } = fakeFetch([
+test('collects text, records a fire-and-forget go_to tool call, returns the stream shape', async () => {
+  const { impl } = fakeFetch([
     { type: 'text', content: 'Sure — heading over. ', threadId: 'th_1', messageId: 'm_1' },
-    { type: 'tool', content: 'navigate_to_page {"path":"/getting-started/"}', threadId: 'th_1', tool_metadata: { id: 'tc_1', wait_for_response: true } },
+    { type: 'tool', content: 'go_to {"path":"/getting-started/"}', threadId: 'th_1', tool_metadata: { id: 'tc_1' } },
     { type: 'text', content: 'Here we are.', threadId: 'th_1' },
   ]);
-  const r = await chatTurnWithAck({ management, configId: 1, message: 'take me to getting started', threadId: null, routes: ROUTES, fetchImpl: impl });
+  const r = await chatTurn({ management, configId: 1, message: 'take me to getting started', threadId: null, fetchImpl: impl });
 
   assert.equal(r.text, 'Sure — heading over. Here we are.');
   assert.equal(r.threadId, 'th_1');
   assert.equal(r.toolCalls.length, 1);
-  assert.equal(r.toolCalls[0].name, 'navigate_to_page');
+  assert.equal(r.toolCalls[0].name, 'go_to');
   assert.deepEqual(r.toolCalls[0].args, { path: '/getting-started/' });
   assert.equal(r.rawToolSegCount, 1);
   assert.equal(r.spiralDetected, false);
   assert.equal(r.spiralRecovered, false);
   assert.deepEqual(r.warnings, []);
-  assert.deepEqual(r.acks, [{ name: 'navigate_to_page', response: { ok: true, path: '/getting-started/', highlightable: [] } }]);
-
-  const ackCall = calls.find((c) => c.url.endsWith('/assistant/tool_response'));
-  assert.ok(ackCall, 'tool_response POST happened');
-  assert.equal(ackCall.body.tool_name, 'navigate_to_page');
-  assert.equal(ackCall.body.tool_id, 'tc_1');
-  assert.equal(ackCall.body.tool_invocation_id, 'tc_1');
-  assert.deepEqual(ackCall.body.response, { ok: true, path: '/getting-started/', highlightable: [] });
-  assert.equal(ackCall.headers.Authorization, `KS ${FAKE_TOKEN}`);
+  assert.equal('acks' in r, false);
 });
 
 test('carries threadId, capabilities, and page_context (via setDynamicPrompt) on the converse body', async () => {
   const { impl, calls } = fakeFetch([{ type: 'text', content: 'The page has three sections.', threadId: 'th_2' }]);
-  const pageContext = {
-    page: { title: 'Getting Started', url: '/getting-started/' },
-    highlightable_elements: [{ id: 'install', label: 'Install' }],
-  };
-  const r = await chatTurnWithAck({
-    management, configId: 1, message: 'what sections are on this page?', threadId: 'th_2', routes: ROUTES,
+  const pageContext = { page: { title: 'Getting Started', url: '/getting-started/' } };
+  const r = await chatTurn({
+    management, configId: 1, message: 'what sections are on this page?', threadId: 'th_2',
     capabilities: { use_knowledge_base: 'on' }, pageContext, fetchImpl: impl,
   });
 
@@ -95,62 +77,22 @@ test('carries threadId, capabilities, and page_context (via setDynamicPrompt) on
   assert.equal(r.threadId, 'th_2');
 });
 
-test('nav to an unknown path ACKs not_found; highlight uses the forced ack when given', async () => {
+test('records go_to with both path and section args, no ACK POST is ever made', async () => {
   const { impl, calls } = fakeFetch([
-    { type: 'tool', content: 'navigate_to_page {"path":"/no-such-page/"}', tool_metadata: { id: 'tc_a', wait_for_response: true } },
-    { type: 'tool', content: 'highlight_element {"id":"install"}', tool_metadata: { id: 'tc_b', wait_for_response: true } },
+    { type: 'tool', content: 'go_to {"path":"/getting-started/","section":"install"}', tool_metadata: { id: 'tc_a' } },
   ]);
-  const r = await chatTurnWithAck({
-    management, configId: 1, message: 'go somewhere fake and highlight install', threadId: null, routes: ROUTES,
-    highlightAck: { ok: true, id: 'install', label: 'Install' }, fetchImpl: impl,
-  });
+  const r = await chatTurn({ management, configId: 1, message: 'show me how to install it', threadId: null, fetchImpl: impl });
 
-  assert.deepEqual(r.acks, [
-    { name: 'navigate_to_page', response: { ok: false, error: 'not_found' } },
-    { name: 'highlight_element', response: { ok: true, id: 'install', label: 'Install' } },
-  ]);
-  const ackBodies = calls.filter((c) => c.url.endsWith('/assistant/tool_response')).map((c) => c.body);
-  assert.equal(ackBodies.length, 2);
-  assert.deepEqual(ackBodies[0].response, { ok: false, error: 'not_found' });
-  assert.deepEqual(ackBodies[1].response, { ok: true, id: 'install', label: 'Install' });
-});
-
-test('a successful nav ack carries the destination page\'s real highlightable list (Path B\'s prerequisite)', async () => {
-  const siteData = {
-    highlightTargets: [{ url: '/getting-started/', id: 'install-cmd', label: 'Install command' }],
-    headingTargets: [
-      { url: '/getting-started/', id: 'install-cmd', label: 'duplicate, must dedupe to the tagged one' },
-      { url: '/getting-started/', id: 'next-steps', label: 'Next steps' },
-      { url: '/', id: 'quickstart', label: 'Quick-start' },
-    ],
-  };
-  const { impl } = fakeFetch([
-    { type: 'tool', content: 'navigate_to_page {"path":"/getting-started/"}', tool_metadata: { id: 'tc_1', wait_for_response: true } },
-  ]);
-  const r = await chatTurnWithAck({ management, configId: 1, message: 'take me there', threadId: null, routes: ROUTES, siteData, fetchImpl: impl });
-
-  assert.deepEqual(r.acks, [{
-    name: 'navigate_to_page',
-    response: { ok: true, path: '/getting-started/', highlightable: [{ id: 'install-cmd', label: 'Install command' }, { id: 'next-steps', label: 'Next steps' }] },
-  }]);
-});
-
-test('simulateNavNotFound forces a not-found ack even for a real path, without touching the call itself', async () => {
-  const { impl } = fakeFetch([
-    { type: 'tool', content: 'navigate_to_page {"path":"/getting-started/"}', tool_metadata: { id: 'tc_1', wait_for_response: true } },
-  ]);
-  const r = await chatTurnWithAck({ management, configId: 1, message: 'take me there', threadId: null, routes: ROUTES, simulateNavNotFound: true, fetchImpl: impl });
-
-  assert.deepEqual(r.toolCalls[0].args, { path: '/getting-started/' });
-  assert.deepEqual(r.acks, [{ name: 'navigate_to_page', response: { ok: false, error: 'not_found' } }]);
+  assert.deepEqual(r.toolCalls[0].args, { path: '/getting-started/', section: 'install' });
+  assert.ok(!calls.some((c) => c.url.endsWith('/assistant/tool_response')), 'no tool_response POST for a fire-and-forget tool');
 });
 
 test('flags a spiral post-hoc from raw tool segment count, never claims recovery', async () => {
   const segs = Array.from({ length: TOOL_SPIRAL_HARD_LIMIT }, (_, i) => (
-    { type: 'tool', content: 'navigate_to_page {"path":"/"}', tool_metadata: { id: `tc_${i}` } }
+    { type: 'tool', content: 'go_to {"path":"/"}', tool_metadata: { id: `tc_${i}` } }
   ));
   const { impl } = fakeFetch(segs);
-  const r = await chatTurnWithAck({ management, configId: 1, message: 'home please', threadId: null, routes: ROUTES, fetchImpl: impl });
+  const r = await chatTurn({ management, configId: 1, message: 'home please', threadId: null, fetchImpl: impl });
 
   assert.equal(r.rawToolSegCount, TOOL_SPIRAL_HARD_LIMIT);
   assert.equal(r.spiralDetected, true);
@@ -161,9 +103,9 @@ test('flags a spiral post-hoc from raw tool segment count, never claims recovery
 
 test('surfaces the empty_turn_with_request_vars warning when page_context rides an empty turn', async () => {
   const { impl } = fakeFetch([]);
-  const r = await chatTurnWithAck({
-    management, configId: 1, message: 'anything on this page?', threadId: null, routes: ROUTES,
-    pageContext: { page: { title: 'Home', url: '/' }, highlightable_elements: [] }, fetchImpl: impl,
+  const r = await chatTurn({
+    management, configId: 1, message: 'anything on this page?', threadId: null,
+    pageContext: { page: { title: 'Home', url: '/' } }, fetchImpl: impl,
   });
 
   assert.equal(r.text, '');

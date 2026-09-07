@@ -198,7 +198,7 @@ function renderSummary(report, container) {
       <span>${s.totalTurns} turns</span>
       <span>${s.releaseBlockingFailCount} release-blocking</span>
       <span>${s.erroredTurnCount} errored</span>
-      <span>${s.routesExercised}/${s.routesTotal} routes</span>
+      <span>${s.pagesExercised}/${s.pagesTotal} pages</span>
       <span>p50 ${s.latency.p50}ms · p90 ${s.latency.p90}ms</span>
     </div>
     ${reliability}
@@ -246,7 +246,7 @@ async function loadHistory() {
 }
 
 /* ---------- personas browser ---------- */
-const FLAG_KEYS = ['expectTools', 'forbidTools', 'expectNavPath', 'relevanceAny', 'expectRestrictedRefusal', 'expectNoPromptLeak', 'expectNoInventedPath', 'expectNoInventedApi', 'isKickoff', 'mustHonor', 'skipCompleteness', 'simulateHighlightSuccess', 'simulateHighlightLabel'];
+const FLAG_KEYS = ['expectTools', 'forbidTools', 'expectNavPath', 'expectSection', 'relevanceAny', 'expectRestrictedRefusal', 'expectNoPromptLeak', 'expectNoInventedPath', 'expectNoInventedApi', 'isKickoff', 'isResumeKickoff', 'mustHonor', 'skipCompleteness', 'transport'];
 
 function personaGroupHtml(p) {
   return `
@@ -289,13 +289,11 @@ $('#btn-quick-run').addEventListener('click', async () => {
     try { expectation = JSON.parse(raw); }
     catch { return alert('Expectation must be valid JSON (or left blank).'); }
   }
-  const simulateHighlightSuccess = $('#quick-simulate-highlight').checked;
-  const simulateHighlightLabel = $('#quick-simulate-highlight-label').value.trim() || undefined;
   out.innerHTML = '<p class="hint">running…</p>';
   const r = await fetch('/api/quick-test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, expectation, simulateHighlightSuccess, simulateHighlightLabel }),
+    body: JSON.stringify({ prompt, expectation }),
   }).then((r) => r.json());
   if (r.error) { out.innerHTML = `<p class="hint">Error: ${esc(r.error.detail || r.error.code)}</p>`; return; }
   const s = r.scored;

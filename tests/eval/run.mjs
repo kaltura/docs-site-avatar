@@ -5,13 +5,14 @@
  *
  * Drives the REAL provisioned brain (configId from server/agent.json) headlessly via the SDK's
  * `Conversations.stream()` — plus, for the chat-mode/transport-switch/page-context personas,
- * via the SDK's real `KalturaChatSession` (see chat-transport.mjs) — self-ACKing
- * `navigate_to_page` tool calls exactly like a real browser session's `respondToTool()`
- * would (see transport.mjs). Route/highlight-target ground
- * truth loads live from the site checkout (see site-data.mjs) so the suite can never drift out
- * of sync with the real nav. A run with any release-blocking probe failure (invented URL/path,
- * a restricted-topic answer that isn't a refusal, a leaked prompt, or a knowledge-base search
- * firing while `use_knowledge_base:'off'`) exits non-zero.
+ * via the SDK's real `KalturaChatSession` (see chat-transport.mjs). Nova's only client tool,
+ * `go_to(path, section?)`, is fire-and-forget, so the harness records every call and never
+ * ACKs anything (see transport.mjs). Ground truth (nav.js routes + the published
+ * `sections.json` manifest `go_to` navigates against) loads live (see site-data.mjs), so the
+ * suite can never drift out of sync with the real site. A run with any release-blocking probe
+ * failure (invented URL/path, an unresolvable `go_to` section, a restricted-topic answer that
+ * isn't a refusal, a leaked prompt, or a knowledge-base search firing while
+ * `use_knowledge_base:'off'`) exits non-zero.
  *
  * The actual turn-loop/scoring/aggregation logic lives in engine.mjs, and artifact writing in
  * artifacts.mjs, so the dashboard server (dashboard/server.mjs) can drive the identical live
@@ -42,7 +43,7 @@ import { loadEnv } from '../../load-env.mjs';
 import { loadSiteData } from './site-data.mjs';
 import { buildPersonas } from './personas.mjs';
 import { toolNames } from './probes.mjs';
-import { streamTurnWithAck } from './transport.mjs';
+import { streamTurn } from './transport.mjs';
 import { runEval } from './engine.mjs';
 import { writeArtifacts } from './artifacts.mjs';
 
@@ -64,8 +65,8 @@ const trialsArg = process.argv.includes('--trials') ? Number(process.argv[proces
 const trials = Number.isInteger(trialsArg) && trialsArg > 0 ? trialsArg : 1;
 const judgeArg = process.argv.includes('--judge') ? process.argv[process.argv.indexOf('--judge') + 1] : null;
 
-log(`▶ loaded ${siteData.routes.length} routes, ${siteData.highlightTargets.length} tagged highlight targets, ${siteData.headingTargets.length} heading targets (the page-context persona pushes one page's headings as live page_context) from ${siteData.siteDir}`);
-if (siteData.untaggedRoutes.length) log(`  (untagged pages, expected — not every page needs a highlight target: ${siteData.untaggedRoutes.map((r) => r.url).join(', ')})`);
+const sectionCount = siteData.manifest.pages.reduce((n, p) => n + p.sections.length, 0);
+log(`▶ loaded ${siteData.routes.length} routes from ${siteData.siteDir}; sections manifest v${siteData.manifest.version}: ${siteData.manifest.pages.length} pages, ${sectionCount} sections`);
 if (trials > 1) log(`▶ running ${trials} trials per persona for pass^k reliability gating`);
 
 /**
@@ -89,7 +90,7 @@ async function warmUpKnowledgeRetrieval() {
     const timer = setTimeout(() => ctrl.abort(), WARMUP_TURN_TIMEOUT_MS);
     let text = '';
     try {
-      ({ text } = await streamTurnWithAck({ management, configId: agent.configId, message: WARMUP_PROMPT, routes: siteData.routes, signal: ctrl.signal }));
+      ({ text } = await streamTurn({ management, configId: agent.configId, message: WARMUP_PROMPT, signal: ctrl.signal }));
     } catch (e) {
       log(`  ! warm-up attempt ${attempt}/${WARMUP_ATTEMPTS} errored: ${e.message}`);
     } finally {
@@ -144,7 +145,7 @@ if (judgeArg) {
 const summary = report.summary;
 await writeArtifacts(report, { artDir: ART, historyDir: HISTORY });
 
-log(`\n${summary.healthy ? '✅' : '⛔'} ${summary.totalTurns} turns · overall ${(summary.overall * 100).toFixed(0)}% · ${summary.releaseBlockingFailCount} release-blocking failures · ${summary.erroredTurnCount} errored/timed-out turns · ${summary.routesExercised}/${summary.routesTotal} routes exercised`);
+log(`\n${summary.healthy ? '✅' : '⛔'} ${summary.totalTurns} turns · overall ${(summary.overall * 100).toFixed(0)}% · ${summary.releaseBlockingFailCount} release-blocking failures · ${summary.erroredTurnCount} errored/timed-out turns · ${summary.pagesExercised}/${summary.pagesTotal} manifest pages exercised`);
 if (summary.reliability) log(`   reliability (${trials} trials): ${summary.reliability.turnsFlaky} flaky turns, ${summary.reliability.turnsPassPowK}/${summary.reliability.totalTurns} pass^k-clean`);
 log('   wrote tests/eval/artifacts/{transcript,report}.json + report.md + history snapshot');
 if (!summary.healthy) process.exitCode = 1;

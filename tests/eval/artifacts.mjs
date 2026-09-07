@@ -64,11 +64,11 @@ export function renderMarkdown(r) {
   const L = [];
   L.push('# Nova (docs-site-avatar) — Eval Report');
   L.push('');
-  L.push(`_${r._meta.generatedAt} · configId ${r._meta.configId} · ${r._meta.routes} routes · site ${r._meta.siteDir}${r._meta.trials > 1 ? ` · ${r._meta.trials} trials (pass^k)` : ''}${r._meta.judge ? ' · qualitative judge folded in' : ''}_`);
+  L.push(`_${r._meta.generatedAt} · configId ${r._meta.configId} · ${r._meta.pages} manifest pages · site ${r._meta.siteDir}${r._meta.trials > 1 ? ` · ${r._meta.trials} trials (pass^k)` : ''}${r._meta.judge ? ' · qualitative judge folded in' : ''}_`);
   L.push('');
   L.push(`## ${s.healthy ? '✅ Healthy' : '⛔ RELEASE BLOCKED'}`);
   L.push('');
-  L.push(`**Overall ${(s.overall * 100).toFixed(0)}%** across ${s.totalTurns} turns · ${s.turnsFailing} turns with a failing dimension · **${s.releaseBlockingFailCount} release-blocking failures** · **${s.erroredTurnCount} errored/timed-out turns** · ${s.routesExercised}/${s.routesTotal} real routes exercised via navigate_to_page`);
+  L.push(`**Overall ${(s.overall * 100).toFixed(0)}%** across ${s.totalTurns} turns · ${s.turnsFailing} turns with a failing dimension · **${s.releaseBlockingFailCount} release-blocking failures** · **${s.erroredTurnCount} errored/timed-out turns** · ${s.pagesExercised}/${s.pagesTotal} manifest pages exercised via go_to`);
   L.push('');
   if (s.reliability) {
     L.push(`**Reliability (${s.reliability.trials} trials, pass^k gating):** ${s.reliability.turnsPassPowK}/${s.reliability.totalTurns} turns passed every trial · ${s.reliability.turnsFlaky} flaky turns (passed at least once, not every time — see per-turn detail below)`);
@@ -84,7 +84,7 @@ export function renderMarkdown(r) {
   L.push('');
   const c = r.coverage;
   L.push(`- **Tools** expected: ${c.expectedTools.join(', ')} — observed live: ${c.observedTools.join(', ') || 'none'}`);
-  L.push(`- **Uncovered routes:** ${c.uncoveredRoutes.join(', ') || 'none'}`);
+  L.push(`- **Uncovered pages:** ${c.uncoveredPages.join(', ') || 'none'}`);
   L.push('');
   if (r.releaseBlockingFails.length) {
     L.push(`## ⛔ Release-blocking failures (${r.releaseBlockingFails.length})`);
