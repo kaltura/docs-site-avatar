@@ -40,6 +40,14 @@ test('githubSlugify: lowercases, spaces to hyphens, strips punctuation', () => {
 test('githubSlugify: trims surrounding whitespace', () => {
   assert.equal(githubSlugify('  Voice Input Modes  '), 'voice-input-modes');
 });
+/* GitHub keeps one hyphen per whitespace character: a stripped dash or ampersand leaves two
+ * spaces, so the id gets `--`. The manifest holds these ids (51 of the live site's sections), and a
+ * collapsed slug would find none of them, leaving those chunks without a section pointer. */
+test('githubSlugify: each whitespace char is its own hyphen, matching the site and GitHub', () => {
+  assert.equal(githubSlugify("What it is — and isn't"), 'what-it-is--and-isnt');
+  assert.equal(githubSlugify('Endpoints & Credentials'), 'endpoints--credentials');
+  assert.equal(githubSlugify('Step 1 — Get your credentials (~1 minute)'), 'step-1--get-your-credentials-1-minute');
+});
 
 /* splitIntoSections — every chunk after the first carries ONE provenance line: the complete go_to
    argument object (path, plus the manifest's section key when it lists the section — never a raw
@@ -96,6 +104,28 @@ test('rewriteTargetMarkup: a target the manifest does not list keeps only its la
 test('rewriteTargetMarkup: a wrapper shown inside a fenced code block is documentation and is left alone', () => {
   const md = '# Guide\n\n```html\n<div data-nova-target="x" data-nova-label="X">\n</div>\n```\n';
   assert.equal(rewriteTargetMarkup(md, '/guides/nav/', pageOf(['x'])), md);
+});
+/* In-page anchor links: the structured-data-forms page's "On this page" list carried
+   `#what-it-is--and-isnt` and `#whats-possible--whats-not`; live, the brain sent the section
+   `what-it-is--whats-possible-whats` (two manifest keys fused with an id's `--`). */
+test('rewriteTargetMarkup: an in-page anchor link keeps its label and loses the heading id', () => {
+  const md = '# Guide\n\n**On this page:** [What it is — and isn\'t](#what-it-is--and-isnt) · [What\'s possible / what\'s not](#whats-possible--whats-not)\n\nSee [the SDK repo](https://github.com/kaltura/intelligent-agents-sdk) and [Getting Started](/getting-started/).';
+  const out = rewriteTargetMarkup(md, '/guides/structured-data-forms/', pageOf(['what-it-is', 'what-it-is--and-isnt']));
+  assert.ok(out.includes('**On this page:** What it is — and isn\'t · What\'s possible / what\'s not\n'));
+  assert.ok(!out.includes('#what-it-is--and-isnt'));
+  assert.ok(!out.includes('--whats-not'));
+  assert.ok(out.includes('[the SDK repo](https://github.com/kaltura/intelligent-agents-sdk)'));
+  assert.ok(out.includes('[Getting Started](/getting-started/)'));
+});
+test('rewriteTargetMarkup: an anchor link inside a fenced code block is left alone', () => {
+  const md = '# Guide\n\n```md\n[Top](#top)\n```\n';
+  assert.equal(rewriteTargetMarkup(md, '/guides/nav/', pageOf(['x'])), md);
+});
+test('splitIntoSections: no chunk carries a heading id from an anchor link', () => {
+  const md = '# Guide\n\nJump to [What it is](#what-it-is--and-isnt).\n\n## What it is — and isn\'t\n\nBody with [back to top](#guide).';
+  const chunks = splitIntoSections(md, { url: '/guides/forms/' }, pageOf(['what-it-is', 'what-it-is--and-isnt']));
+  assert.equal(chunks[0], '# Guide\n\nJump to What it is.');
+  assert.equal(chunks[1], `# Guide\n${ARGS('/guides/forms/', 'what-it-is')}\n\n## What it is — and isn't\n\nBody with back to top.`);
 });
 test('splitIntoSections: the chunk carries both the section object and the target object, never the raw id', () => {
   const chunks = splitIntoSections(TARGET_MD, { url: '/' }, HOME);
