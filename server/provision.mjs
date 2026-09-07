@@ -278,8 +278,8 @@ async function loadDocContent(siteDir, docs) {
 export function hashDocs(docs, manifest = null) {
   const h = createHash('sha256');
   h.update(`${CHUNK_FORMAT}\n`);
-  for (const p of manifest?.pages || []) h.update(`${p.path}\n${(p.sections || []).map((s) => `${s.key}=${s.id}`).join(',')}\n `);
-  for (const d of docs) h.update(`${d.file}\n${d.markdown}\n `);
+  for (const p of manifest?.pages || []) h.update(`${p.path}\n${(p.sections || []).map((s) => `${s.key}=${s.id}`).join(',')}\n\0`);
+  for (const d of docs) h.update(`${d.file}\n${d.markdown}\n\0`);
   return h.digest('hex');
 }
 
