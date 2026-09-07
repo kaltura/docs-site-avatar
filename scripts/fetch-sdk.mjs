@@ -2,7 +2,7 @@
 /**
  * Vendors @kaltura/intelligent-agents from jsDelivr's GitHub CDN into vendor/sdk
  * at a pinned tag — the same CDN + pinning scheme the docs site's browser-side
- * connect.js already uses (SDK_TAG / cdn.jsdelivr.net/gh/kaltura/intelligent-agents-sdk).
+ * src/assets/nova/sdk.js already uses (SDK_TAG / cdn.jsdelivr.net/gh/kaltura/intelligent-agents-sdk).
  * This repo has no local sibling checkout of the SDK, so this is how it gets one.
  *
  * Usage: node scripts/fetch-sdk.mjs [--tag vX.Y.Z] [--force]

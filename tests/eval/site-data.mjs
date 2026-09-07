@@ -28,15 +28,18 @@ function fileForUrl(url) {
 
 async function loadManifest(siteDir, fetchImpl) {
   const local = join(siteDir, '_site', MANIFEST_REL_PATH);
-  let raw;
+  let text;
   try {
-    raw = JSON.parse(await readFile(local, 'utf8'));
-  } catch {
+    text = await readFile(local, 'utf8');
+  } catch (err) {
+    // Only "no local build" falls back to the public site. A present-but-unreadable or
+    // malformed local file must fail loudly, not be papered over by the live manifest.
+    if (err?.code !== 'ENOENT') throw err;
     const res = await fetchImpl(`${BASE_URL}/${MANIFEST_REL_PATH}`);
     if (!res.ok) throw new Error(`site-data: ${MANIFEST_REL_PATH} not built at ${local} and fetch from the public site failed (${res.status})`);
-    raw = await res.json();
+    return validateSectionsManifest(await res.json());
   }
-  return validateSectionsManifest(raw);
+  return validateSectionsManifest(JSON.parse(text));
 }
 
 /**

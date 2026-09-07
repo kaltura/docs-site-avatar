@@ -31,8 +31,10 @@ export const TOOL_SPIRAL_HARD_LIMIT = 6;
  *   `conversations.stream()` (e.g. `{use_knowledge_base:'on'}` to probe RAG for one turn without
  *   touching the live agent's stored capability state — see conversations.stream()'s doc comment
  *   on the stored-DISABLED-veto vs. stored-off-can-be-overridden distinction).
- * @param {typeof fetch} [opts.fetchImpl] unused here (the SDK client owns its fetch); accepted so
- *   both transports share one call signature.
+ * @param {typeof fetch} [opts.fetchImpl] ignored here (the SDK client owns its fetch); part of the
+ *   signature only so engine.mjs can call either transport with the same options object.
+ * @param {object} [opts.pageContext] ignored here (no socket, so no `setDynamicPrompt()`); same
+ *   shared-signature reason as `fetchImpl`. chat-transport.mjs honours both.
  * @param {AbortSignal} [opts.signal] forwarded straight to `conversations.stream()` — the eval's
  *   own turn-level timeout (see engine.mjs's `withTimeout`) MUST abort this when it fires, or the
  *   abandoned stream keeps its connection open and this function's `for await` loop keeps
@@ -40,7 +42,8 @@ export const TOOL_SPIRAL_HARD_LIMIT = 6;
  *   the run finished and printed its report (the CLI never actually exited).
  * @returns {Promise<{text:string, threadId:string|null, toolCalls:object[], rawToolSegCount:number, spiralDetected:boolean, spiralRecovered:boolean}>}
  */
-export async function streamTurn({ management, configId, message, threadId, capabilities, signal }) {
+// fetchImpl/pageContext are intentionally unused here (shared signature, see JSDoc).
+export async function streamTurn({ management, configId, message, threadId, capabilities, fetchImpl, pageContext, signal }) {
   async function runOnce(userMessage, tid) {
     const token = await management.sessions.createConversationToken({ configId });
     const gen = management.conversations.stream({ userMessage, ...(tid ? { threadId: tid } : {}), ...(capabilities ? { capabilities } : {}), signal }, token);
