@@ -42,9 +42,16 @@ async function loadManifest(siteDir, fetchImpl) {
   return validateSectionsManifest(JSON.parse(text));
 }
 
+/** The SDK tag the home page's quick-start pins its jsDelivr import to, e.g. `v1.17.0`; null if
+ * the page has no such pin. Read live so the eval's version probe can never go stale. */
+export function quickStartSdkTag(indexMd) {
+  const m = /intelligent-agents-sdk@(v\d+\.\d+\.\d+)/.exec(indexMd || '');
+  return m ? m[1] : null;
+}
+
 /**
  * @param {{siteDir?:string, fetchImpl?:typeof fetch}} [opts]
- * @returns {Promise<{siteDir:string, baseUrl:string, routes:{group:string,title:string,url:string,file:string}[], manifest:{version:number, lang?:string, pages:{path:string,title?:string,sections:{key:string,id:string,text:string}[]}[]}}>}
+ * @returns {Promise<{siteDir:string, baseUrl:string, sdkTag:string|null, routes:{group:string,title:string,url:string,file:string}[], manifest:{version:number, lang?:string, pages:{path:string,title?:string,sections:{key:string,id:string,text:string}[]}[]}}>}
  */
 export async function loadSiteData(opts = {}) {
   const siteDir = opts.siteDir || resolveSiteDir();
@@ -61,5 +68,6 @@ export async function loadSiteData(opts = {}) {
   }
 
   const manifest = await loadManifest(siteDir, opts.fetchImpl || fetch);
-  return { siteDir, baseUrl: BASE_URL, routes, manifest };
+  const sdkTag = quickStartSdkTag(await readFile(join(siteDir, 'src', 'index.md'), 'utf8').catch(() => ''));
+  return { siteDir, baseUrl: BASE_URL, sdkTag, routes, manifest };
 }

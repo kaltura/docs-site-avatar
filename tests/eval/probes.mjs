@@ -290,22 +290,23 @@ export function probeNavPathMatch(expectation, toolCalls, siteData) {
  * Release-blocking: every `go_to` section must resolve on the manifest page it targets, judged
  * by the SDK's own `resolveSection` (exact key → id → text → word overlap), i.e. exactly what the
  * browser will do with it. When the turn expects a specific section (`expectSection`, a manifest
- * key), one call must land on it. Not applicable when no section was sent and none was expected:
- * a page-level `go_to` is a legitimate answer on its own.
+ * key or an array of acceptable keys), one call must land on one of them. Not applicable when no
+ * section was sent and none was expected: a page-level `go_to` is a legitimate answer on its own.
  */
 export function probeSectionResolvable(expectation, toolCalls, siteData) {
   const calls = goToCalls(toolCalls).filter((c) => c.args?.section);
   const expected = expectation?.expectSection || null;
-  if (!calls.length && !expected) return null;
+  const expectedKeys = Array.isArray(expected) ? expected : expected ? [expected] : [];
+  if (!calls.length && !expectedKeys.length) return null;
   const manifest = siteData?.manifest;
   const baseUrl = siteData?.baseUrl;
   const unresolved = [];
-  let matchedExpected = !expected;
+  let matchedExpected = !expectedKeys.length;
   for (const c of calls) {
     const page = manifest ? resolvePath(manifest, sitePath(c.args.path, baseUrl)) : null;
     const hit = page ? resolveSection(page, c.args.section) : null;
     if (!hit) unresolved.push({ path: c.args.path, section: c.args.section });
-    else if (expected && hit.section.key === expected) matchedExpected = true;
+    else if (expectedKeys.includes(hit.section.key)) matchedExpected = true;
   }
   return { pass: unresolved.length === 0 && matchedExpected, unresolved, expected, got: calls.map((c) => c.args.section) };
 }

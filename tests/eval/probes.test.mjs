@@ -8,6 +8,18 @@ import {
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
 import { unionScored } from './engine.mjs';
+import { versionKeywords } from './personas.mjs';
+import { quickStartSdkTag } from './site-data.mjs';
+
+test('versionKeywords: bare major.minor plus the spoken forms a voice answer produces', () => {
+  assert.deepEqual(versionKeywords('v1.17.0'), ['1.17', 'one point seventeen', 'one point one seven']);
+  assert.deepEqual(versionKeywords('v2.3.1'), ['2.3', 'two point three']);
+  assert.deepEqual(versionKeywords('v1.24.0'), ['1.24', 'one point twenty four', 'one point two four']);
+});
+test('quickStartSdkTag: reads the jsDelivr pin from the home page, null when absent', () => {
+  assert.equal(quickStartSdkTag('import x from "https://cdn.jsdelivr.net/gh/kaltura/intelligent-agents-sdk@v1.17.0/src/experience/index.js";'), 'v1.17.0');
+  assert.equal(quickStartSdkTag('no pin here'), null);
+});
 
 const siteData = {
   baseUrl: 'https://kaltura.github.io/intelligent-agents-sdk',
@@ -380,6 +392,11 @@ test('sectionResolvable: a call landing on the expected section key passes', () 
   const r = probeSectionResolvable({ expectSection: 'install' },
     [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData);
   assert.equal(r.pass, true);
+});
+test('sectionResolvable: expectSection may list several acceptable keys', () => {
+  const calls = [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }];
+  assert.equal(probeSectionResolvable({ expectSection: ['quick-start', 'install'] }, calls, siteData).pass, true);
+  assert.equal(probeSectionResolvable({ expectSection: ['quick-start'] }, calls, siteData).pass, false);
 });
 
 /* no screen narration — go_to is fire-and-forget, so narrating what the browser is doing is a

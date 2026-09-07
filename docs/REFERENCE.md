@@ -27,7 +27,7 @@
 | `tests/eval/probes.mjs` | Scoring layer — pure per-dimension check functions, `DIMENSIONS`, `RELEASE_BLOCKING` |
 | `tests/eval/probes.test.mjs` | Unit tests for `probes.mjs` |
 | `tests/eval/personas.mjs` | The persona/turn dataset the eval drives the live agent through |
-| `tests/eval/site-data.mjs` | Live route + highlight-target ground truth, read from the site checkout |
+| `tests/eval/site-data.mjs` | Live route, sections-manifest, and quick-start SDK tag ground truth, read from the site checkout |
 | `tests/eval/artifacts.mjs` | Writes `transcript.json`/`report.json`/`report.md` + history snapshots |
 | `tests/eval/run.mjs` | CLI entry point for a full eval run |
 | `tests/eval/artifacts/` | Gitignored — `report.json`/`report.md`/`transcript.json` + `history/` |
@@ -132,8 +132,8 @@ Base: `http://localhost:8093` (or `NOVA_DASHBOARD_PORT`). All routes are same-pr
 | GET | `/api/report/latest` | read — the current `report.json`, or `null` if none exists yet |
 | GET | `/api/history` | read — the lightweight history index (`listHistory`) |
 | GET | `/api/history/:file` | read — one full historical report by filename |
-| GET | `/api/personas` | read — full persona/turn data plus site route and highlight-target ground truth |
-| POST | `/api/quick-test` | read — runs one ad-hoc prompt (`{prompt, expectation?, simulateHighlightSuccess?, simulateHighlightLabel?}`) through the live agent and scores it; does not write artifacts |
+| GET | `/api/personas` | read — full persona/turn data plus site route and sections-manifest ground truth |
+| POST | `/api/quick-test` | read — runs one ad-hoc prompt (`{prompt, expectation?}`) through the live agent and scores it; `expectation.transport: 'chat'` and `expectation.pageContext` are honoured; does not write artifacts |
 | GET | `/api/judge/prompt` | read — the judge rubric plus the current `transcript.json`, ready to paste into an external LLM; 404-shaped error if no transcript exists yet |
 | POST | `/api/judge/import` | write, idempotent — folds a judge verdicts body into `report.json`/`report.md`; 404-shaped error if no report exists yet |
 | GET | *(any other path)* | read — static file from `tests/eval/dashboard/public/` |
