@@ -14,7 +14,7 @@ Take `<configId>` and `<agentId>` from your existing `server/agent.json`. Add `-
 
 ## Redeploy Nova via GitHub Actions
 
-Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` on `main`. Either way, the job waits for a required reviewer on the `production` environment before it runs `provision.mjs --reuse` against the ids in `server/agent.json`, then, if anything changed, opens a PR against `main` with the updated file (via `gh pr create` on a new branch) instead of pushing directly — a human still merges it. See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why the environment gate exists and why the docs site's own deploy doesn't trigger this automatically.
+Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` on `main`. Either way, the job waits for a required reviewer on the `production` environment before it runs `provision.mjs --reuse` against the ids in `server/agent.json`. The knowledge corpus is discovered live from the intellect and re-uploaded only when the docs changed, so the job commits nothing back and fails if `server/agent.json` drifted. See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why the environment gate exists and why the docs site's own deploy doesn't trigger this automatically.
 
 Approve the pending deployment from the run's page (or the notification GitHub sends the reviewers) — the run stays queued until someone does.
 

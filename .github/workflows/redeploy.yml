@@ -8,8 +8,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: redeploy-production
@@ -53,29 +52,16 @@ jobs:
             --avatar-id "${{ steps.ids.outputs.avatar-id }}" \
             --site-dir ./site
 
-      - name: Open a PR with the updated server/agent.json
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Confirm server/agent.json is unchanged
         run: |
-          if git diff --quiet server/agent.json; then
-            echo "agent.json unchanged"
-            exit 0
+          # agent.json holds only stable ids (configId, avatarId, agentId, widgetId, tag).
+          # The knowledge corpus is discovered live from the intellect, so a --reuse run
+          # must rewrite the file byte-for-byte. A diff here means an id drifted; that is
+          # a bug to fix, never state to commit back.
+          if ! git diff --exit-code server/agent.json; then
+            echo "::error::server/agent.json changed during a --reuse redeploy; stable ids must not drift"
+            exit 1
           fi
-          # main requires a PR + review for everyone, including this bot's own
-          # GITHUB_TOKEN — it has no branch-protection-admin permission (nor
-          # should it). Push the change to a new branch and open a PR instead
-          # of pushing to main directly; a human merges it, same as any other
-          # main-branch change.
-          BRANCH="redeploy/agent-json-$(date -u +%Y%m%dT%H%M%SZ)"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
-          git add server/agent.json
-          git commit -m "Update server/agent.json after redeploy"
-          git push -u origin "$BRANCH"
-          gh pr create --base main --head "$BRANCH" \
-            --title "Sync server/agent.json after redeploy" \
-            --body "Automated: server/agent.json changed after this run's redeploy. Merge to keep main in sync with the live agent."
 
       - name: Summary
         if: always()
@@ -86,8 +72,9 @@ jobs:
             echo "- agentId: ${{ steps.ids.outputs.agent-id }}"
             echo "- avatarId: ${{ steps.ids.outputs.avatar-id }}"
             echo ""
-            echo "provision.mjs polls \`kaltura.knowledge.entryStatus\` for indexing completion"
-            echo "BEFORE creating or updating the intellect this redeploy, then writes"
-            echo "\`use_knowledge_base:'on'\` in that same call (see docs/ARCHITECTURE.md) — so the"
-            echo "flip lands in a single write rather than a follow-up patch."
+            echo "provision.mjs discovers the intellect's current knowledge corpus live and compares"
+            echo "the docs hash stored on its category with the docs in the site checkout. Same hash:"
+            echo "the corpus is reused. Different hash: it is replaced, indexing is polled via"
+            echo "\`kaltura.knowledge.entryStatus\`, and \`use_knowledge_base:'on'\` is written in the"
+            echo "same intellect update (see docs/ARCHITECTURE.md). Nothing is committed back."
           } >> "$GITHUB_STEP_SUMMARY"

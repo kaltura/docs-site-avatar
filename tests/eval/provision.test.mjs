@@ -12,7 +12,7 @@ const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
   buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup,
-  checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS,
+  checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 
@@ -432,4 +432,30 @@ test('checkCustomPromptSchema: defaults to REQUIRED_CUSTOM_PROMPT_KEYS when no o
   assert.equal(r.clean, true);
   assert.deepEqual(r.missing, []);
   assert.deepEqual(r.extra, []);
+});
+
+/* knowledgeState: what provision()/cleanup() act on after discovering an intellect's corpus live. */
+const HASH = 'a'.repeat(64);
+test('knowledgeState: one record with one category carries its referenceId as the docs hash', () => {
+  const s = knowledgeState([{ id: 3013, categoryIds: [418568503] }], [{ id: 418568503, referenceId: HASH, entryIds: ['1_a', '1_b'] }]);
+  assert.deepEqual(s, { recordIds: [3013], categoryIds: [418568503], entryIds: ['1_a', '1_b'], docsHash: HASH });
+});
+test('knowledgeState: a category without a referenceId (upload never finished) has no docs hash', () => {
+  const s = knowledgeState([{ id: 1, categoryIds: [2] }], [{ id: 2, referenceId: null, entryIds: ['1_a'] }]);
+  assert.equal(s.docsHash, null);
+  assert.deepEqual(s.entryIds, ['1_a']);
+});
+test('knowledgeState: more than one record or category collects every id but trusts no hash', () => {
+  const s = knowledgeState(
+    [{ id: 1, categoryIds: [10] }, { id: 2, categoryIds: [20] }],
+    [{ id: 10, referenceId: HASH, entryIds: ['1_a'] }, { id: 20, referenceId: HASH, entryIds: ['1_b'] }],
+  );
+  assert.deepEqual(s.recordIds, [1, 2]);
+  assert.deepEqual(s.categoryIds, [10, 20]);
+  assert.deepEqual(s.entryIds, ['1_a', '1_b']);
+  assert.equal(s.docsHash, null);
+});
+test('knowledgeState: a record whose category is gone yields the record id only', () => {
+  const s = knowledgeState([{ id: 1, categoryIds: [10] }], []);
+  assert.deepEqual(s, { recordIds: [1], categoryIds: [], entryIds: [], docsHash: null });
 });
