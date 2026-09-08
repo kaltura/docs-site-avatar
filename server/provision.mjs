@@ -526,6 +526,8 @@ async function provision() {
   // own content. When the fingerprint stored on the live category matches, the existing
   // category/record/entries are already correct and indexed, so the teardown/re-upload/
   // indexing-wait below is skipped entirely.
+  // A discovery failure is deliberately fatal here: it happens before any write, and
+  // proceeding blind would upload a second corpus while orphaning the one still linked.
   const live = reuseConfigId ? await discoverKnowledge(admin, reuseConfigId) : null;
   const knowledgeUnchanged = !!live && live.docsHash === docsHash;
 
