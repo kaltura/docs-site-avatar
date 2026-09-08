@@ -3,11 +3,11 @@
  * slide deck, no financial-figure grounding) with its own restricted-topic/prompt-leak/
  * invented-URL/invented-path probes specific to a public SDK-docs assistant.
  *
- * Navigation probes resolve `go_to` arguments through the SDK's own `resolvePath` /
- * `resolveSection` against the published sections manifest, so the eval judges a call exactly
- * the way the browser-side SiteNavigator would act on it.
+ * Navigation probes resolve `go_to` arguments through the SDK's own `resolveTarget` against the
+ * published sections manifest, so the eval judges a call exactly the way the browser-side
+ * SiteNavigator would act on it.
  */
-import { normalizePath, resolvePath, resolveSection } from '../../vendor/sdk/src/core/site-keys.js';
+import { normalizePath, resolveTarget } from '../../vendor/sdk/src/core/site-keys.js';
 
 const LATENCY_TIERS = { snappy: 4000, ok: 6000, slow: 9000 };
 
@@ -270,17 +270,49 @@ function goToCalls(toolCalls) {
   return (toolCalls || []).filter((c) => c.name === 'go_to');
 }
 
-/** Release-blocking: a `go_to` path must be a page the site really has. Exact/normalized match
- * only — the SiteNavigator's fuzzy last-segment fallback is a browser-side courtesy, not a licence
- * for the model to invent paths. */
+/**
+ * How the browser would act on a `go_to` path: `page` when it is a real site page (nav.js route
+ * or manifest page, exact/normalized), `split` when the SDK's `resolveTarget` peels a section
+ * key or id off the end and lands on the parent page, else `invented`.
+ *
+ * The fuzzy fallbacks (last-segment word overlap for pages, text/subset/jaccard for a split-off
+ * segment) are a browser-side courtesy, not a licence for the model to invent paths, so they
+ * never count here: a split only counts when every token is a manifest literal (`key` or `id`).
+ */
+function classifyPath(call, siteData) {
+  const path = sitePath(call.args?.path ?? null, siteData?.baseUrl);
+  if (realPagePaths(siteData).has(path)) return { kind: 'page', landed: path };
+  const manifest = siteData?.manifest;
+  const target = manifest ? resolveTarget(manifest, path, call.args?.section) : null;
+  if (target?.split && ['key', 'id'].includes(target.split.by)) {
+    return { kind: 'split', landed: sitePath(target.page.path), page: target.page.path, section: target.match.section.key };
+  }
+  return { kind: 'invented', landed: null };
+}
+
+/** Release-blocking: a `go_to` path must be a page the site really has, or a page path with one
+ * of its own section keys glued on (`/license` for `{ path: '/', section: 'license' }`), which
+ * the SiteNavigator splits back apart via `resolveTarget`. Anything else is invented. */
 export function probeNoInventedPath(toolCalls, siteData) {
-  const real = realPagePaths(siteData);
   // A missing, blank, or non-string path normalizes to '' and is never a real page, so it counts
   // as invented too: `path` is go_to's one required argument.
   const invented = goToCalls(toolCalls)
-    .map((c) => c.args?.path ?? null)
-    .filter((p) => !real.has(sitePath(p, siteData.baseUrl)));
+    .filter((c) => classifyPath(c, siteData).kind === 'invented')
+    .map((c) => c.args?.path ?? null);
   return { pass: invented.length === 0, invented };
+}
+
+/** Soft: a `go_to` path that only works because `resolveTarget` split a section off it. The
+ * visitor lands on the right section, so it doesn't gate release, but it means the model fused
+ * the SITE MAP's path and section into one token, which is worth watching. */
+export function probeNoSplitPath(toolCalls, siteData) {
+  const calls = goToCalls(toolCalls);
+  if (!calls.length) return null;
+  const split = calls
+    .map((c) => ({ path: c.args?.path ?? null, ...classifyPath(c, siteData) }))
+    .filter((c) => c.kind === 'split')
+    .map(({ path, page, section }) => ({ path, page, section }));
+  return { pass: split.length === 0, split };
 }
 
 export function probeNavPathMatch(expectation, toolCalls, siteData) {
@@ -288,14 +320,15 @@ export function probeNavPathMatch(expectation, toolCalls, siteData) {
   const calls = goToCalls(toolCalls);
   const baseUrl = siteData?.baseUrl;
   const want = sitePath(expectation.expectNavPath, baseUrl);
-  const matched = calls.some((c) => sitePath(c.args?.path, baseUrl) === want);
+  // Judged on the page the browser lands on, so a split path (`/license` → `/`) matches `/`.
+  const matched = calls.some((c) => (classifyPath(c, siteData).landed ?? sitePath(c.args?.path, baseUrl)) === want);
   return { pass: matched, expected: expectation.expectNavPath, got: calls.map((c) => c.args?.path) };
 }
 
 /**
  * Release-blocking: every `go_to` section must resolve on the manifest page it targets, judged
- * by the SDK's own `resolveSection` (exact key → id → text → word overlap), i.e. exactly what the
- * browser will do with it. Not applicable when no section was sent: a page-level `go_to` is a
+ * by the SDK's own `resolveTarget` (exact key → id → text → word overlap, on the parent page
+ * when the path was split), i.e. exactly what the browser will do with it. Not applicable when no section was sent: a page-level `go_to` is a
  * legitimate answer on its own. Whether it was the *expected* section is `sectionMatch`'s job.
  * A blank section (`''` or whitespace) is "no section": the SiteNavigator ignores it and scrolls
  * to the page top, so it is judged the same way here.
@@ -323,17 +356,19 @@ export function probeSectionMatch(expectation, toolCalls, siteData) {
   const expected = expectation?.expectSection || null;
   const expectedKeys = Array.isArray(expected) ? expected : expected ? [expected] : [];
   if (!expectedKeys.length) return null;
-  const calls = goToCalls(toolCalls).filter(hasSection);
+  // Every go_to call counts, not just those with a section argument: a split path carries its
+  // section in the path itself and the browser lands on it all the same.
+  const calls = goToCalls(toolCalls);
   const landed = calls.map((c) => resolvedSectionKey(c, siteData)).filter(Boolean);
-  return { pass: landed.some((k) => expectedKeys.includes(k)), expected, got: landed, sent: calls.map((c) => c.args.section) };
+  return { pass: landed.some((k) => expectedKeys.includes(k)), expected, got: landed, sent: calls.map((c) => c.args?.section ?? null) };
 }
 
-/** The manifest key a `go_to` call's section resolves to on the page it targets, or null. */
+/** The manifest key a `go_to` call lands on (its section argument, or the segment split off a
+ * fused path) on the page it targets, or null. */
 function resolvedSectionKey(call, siteData) {
   const manifest = siteData?.manifest;
-  const page = manifest ? resolvePath(manifest, sitePath(call.args.path, siteData?.baseUrl)) : null;
-  const hit = page ? resolveSection(page, call.args.section) : null;
-  return hit ? hit.section.key : null;
+  const target = manifest ? resolveTarget(manifest, sitePath(call.args?.path, siteData?.baseUrl), call.args?.section) : null;
+  return target?.match ? target.match.section.key : null;
 }
 
 // The SDK's SITE_NAV_RULES_PROMPT says: never narrate what the screen is doing. `go_to` is
@@ -378,6 +413,7 @@ export const DIMENSIONS = [
   'resumeKickoff',
   'noInventedUrl',
   'noInventedPath',
+  'noSplitPath',
   'navPathMatch',
   'sectionMatch',
   'noInventedApi',
@@ -416,6 +452,7 @@ export function scoreTurn(turn, siteData) {
     resumeKickoff: probeResumeKickoff(expectation, text),
     noInventedUrl: probeNoInventedUrl(text, siteData),
     noInventedPath: probeNoInventedPath(toolCalls, siteData),
+    noSplitPath: probeNoSplitPath(toolCalls, siteData),
     navPathMatch: probeNavPathMatch(expectation, toolCalls, siteData),
     sectionMatch: probeSectionMatch(expectation, toolCalls, siteData),
     noInventedApi: probeNoInventedApi(expectation, text),

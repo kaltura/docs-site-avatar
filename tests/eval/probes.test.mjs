@@ -4,7 +4,7 @@ import {
   toolNames, probeLatency, probeTools, probeCompleteness, probeRelevance,
   probeSingleToolCallPerTurn, probeNoKbSearchWhenOff, probeRestrictedTopicRefusal,
   probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probeNoInventedUrl, probeNoInventedPath,
-  probeNavPathMatch, probeNoInventedApi, probeSectionResolvable, probeSectionMatch, probeNoScreenNarration,
+  probeNavPathMatch, probeNoInventedApi, probeSectionResolvable, probeSectionMatch, probeNoScreenNarration, probeNoSplitPath,
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
 import { unionScored } from './engine.mjs';
@@ -31,7 +31,7 @@ const siteData = {
   manifest: {
     version: 1,
     pages: [
-      { path: '/', sections: [{ key: 'quick-start', id: 'quick-start', text: 'Quick start' }] },
+      { path: '/', sections: [{ key: 'quick-start', id: 'quick-start', text: 'Quick start' }, { key: 'license', id: 'license', text: 'License' }] },
       {
         path: '/getting-started/',
         sections: [
@@ -39,7 +39,7 @@ const siteData = {
           { key: 'first-agent', id: 'first-agent', text: 'Your first agent' },
         ],
       },
-      { path: '/guides/voice-input-modes/', sections: [] },
+      { path: '/guides/voice-input-modes/', sections: [{ key: 'push-to-talk', id: 'push-to-talk', text: 'Push to talk' }] },
     ],
   },
 };
@@ -335,6 +335,39 @@ test('noInventedPath: a fabricated absolute URL under the real baseUrl still fai
   const r = probeNoInventedPath([{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/pricing/' } }], siteData);
   assert.equal(r.pass, false);
 });
+// The brain sometimes fuses the SITE MAP's path and section key into one path. The SDK's
+// resolveTarget splits that back apart in the browser, so it is a real landing, not a 404.
+test('noInventedPath: a section key glued onto its page path passes, in every normalized form', () => {
+  for (const path of ['/license', '/license/', 'https://kaltura.github.io/intelligent-agents-sdk/license', '/guides/voice-input-modes/push-to-talk/']) {
+    const r = probeNoInventedPath([{ name: 'go_to', args: { path } }], siteData);
+    assert.equal(r.pass, true, path);
+  }
+});
+test('noInventedPath: a split that only works by fuzzy text match is still invented', () => {
+  // "install-the-sdk" matches the section text, not its key or id: every token must be a manifest literal.
+  const r = probeNoInventedPath([{ name: 'go_to', args: { path: '/getting-started/install-the-sdk/' } }], siteData);
+  assert.equal(r.pass, false);
+  assert.deepEqual(r.invented, ['/getting-started/install-the-sdk/']);
+});
+test('noInventedPath: a real section key under a page that is not its parent is invented', () => {
+  const r = probeNoInventedPath([{ name: 'go_to', args: { path: '/getting-started/license/' } }], siteData);
+  assert.equal(r.pass, false);
+});
+
+/* split path — soft: the model fused path and section into one token */
+test('noSplitPath: not applicable without a go_to call', () => {
+  assert.equal(probeNoSplitPath([], siteData), null);
+  assert.equal(probeNoSplitPath([{ name: 'search', args: {} }], siteData), null);
+});
+test('noSplitPath: a real page path passes; an invented one is noInventedPath\'s job, not a split', () => {
+  assert.equal(probeNoSplitPath([{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }], siteData).pass, true);
+  assert.equal(probeNoSplitPath([{ name: 'go_to', args: { path: '/pricing/' } }], siteData).pass, true);
+});
+test('noSplitPath: a fused path is flagged with the page and section the browser lands on', () => {
+  const r = probeNoSplitPath([{ name: 'go_to', args: { path: '/license' } }], siteData);
+  assert.equal(r.pass, false);
+  assert.deepEqual(r.split, [{ path: '/license', page: '/', section: 'license' }]);
+});
 
 /* nav path match */
 test('navPathMatch: not applicable when unset', () => {
@@ -354,6 +387,11 @@ test('navPathMatch: matching absolute-form path passes', () => {
   const r = probeNavPathMatch({ expectNavPath: '/getting-started/' },
     [{ name: 'go_to', args: { path: 'https://kaltura.github.io/intelligent-agents-sdk/getting-started/' } }], siteData);
   assert.equal(r.pass, true);
+});
+test('navPathMatch: a split path matches the page the browser lands on', () => {
+  const r = probeNavPathMatch({ expectNavPath: '/' }, [{ name: 'go_to', args: { path: '/license' } }], siteData);
+  assert.equal(r.pass, true);
+  assert.equal(probeNavPathMatch({ expectNavPath: '/getting-started/' }, [{ name: 'go_to', args: { path: '/license' } }], siteData).pass, false);
 });
 
 /* invented API */
@@ -414,6 +452,13 @@ test('sectionResolvable: a valid section on a page other than the expected one s
     [{ name: 'go_to', args: { path: '/', section: 'quick-start' } }], siteData);
   assert.equal(r.pass, true);
 });
+test('sectionResolvable: on a split path the section resolves against the parent page', () => {
+  assert.equal(probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/license', section: 'license' } }], siteData).pass, true);
+  assert.equal(probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/license', section: 'quick-start' } }], siteData).pass, true);
+  // A section that resolves nowhere on the parent: the browser still lands on the split-off
+  // segment, so the visitor sees a real section and this does not gate release.
+  assert.equal(probeSectionResolvable({}, [{ name: 'go_to', args: { path: '/license', section: 'pricing-table' } }], siteData).pass, true);
+});
 
 /* section match — soft: did go_to land on the section the turn expected? */
 test('sectionMatch: not applicable when the turn expects no section', () => {
@@ -441,6 +486,12 @@ test('sectionMatch: a valid section that is not the expected one is a miss', () 
     [{ name: 'go_to', args: { path: '/', section: 'quick-start' } }], siteData);
   assert.equal(r.pass, false);
   assert.deepEqual(r.got, ['quick-start']);
+});
+test('sectionMatch: a split path with no section argument lands on the split-off section', () => {
+  const r = probeSectionMatch({ expectSection: 'license' }, [{ name: 'go_to', args: { path: '/license' } }], siteData);
+  assert.equal(r.pass, true);
+  assert.deepEqual(r.got, ['license']);
+  assert.deepEqual(r.sent, [null]);
 });
 test('sectionMatch: expectSection may list several acceptable keys', () => {
   const calls = [{ name: 'go_to', args: { path: '/getting-started/', section: 'install' } }];
@@ -491,6 +542,17 @@ test('scoreTurn: a fully clean turn is healthy', () => {
 
 test('DIMENSIONS and RELEASE_BLOCKING are consistent', () => {
   for (const d of RELEASE_BLOCKING) assert.ok(DIMENSIONS.includes(d));
+  assert.ok(DIMENSIONS.includes('noSplitPath'));
+  assert.ok(!RELEASE_BLOCKING.includes('noSplitPath'));
+});
+
+test('scoreTurn: a split path is healthy but flagged on the soft noSplitPath dimension', () => {
+  const turn = { expectation: { expectNavPath: '/', expectSection: 'license' }, latencyMs: 1000, text: 'The SDK is MIT licensed.', toolCalls: [{ name: 'go_to', args: { path: '/license' } }] };
+  const scored = scoreTurn(turn, siteData);
+  assert.equal(scored.healthy, true);
+  assert.deepEqual(scored.failed, ['noSplitPath']);
+  assert.equal(scored.results.navPathMatch.pass, true);
+  assert.equal(scored.results.sectionMatch.pass, true);
 });
 
 test('scoreTurn: a forbidden tool firing is release-blocking', () => {

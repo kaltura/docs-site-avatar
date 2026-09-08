@@ -28,18 +28,18 @@ Nothing is mocked. The harness drives the same provisioned brain the public site
 | Trust & safety | `restricted-topics`, `adversarial` | Pricing/licensing refusals with no smuggled figures, prompt-injection resistance, no prompt leaks |
 | Navigation | `site-navigator-1/2`, `nonexistent-pages`, `single-nav-discipline` | Every real page reachable, no invented routes, one nav call per turn, no narration of what the screen is doing |
 | Knowledge | `facts-and-scope`, `knowledge-depth`, `release-delta-depth`, `personalization-and-threads-depth` | Answers grounded in the site's own pages, knowledge-base retrieval depth |
-| Sections | `section-navigator` | Section-level `go_to` calls land on a real section key of the targeted page, judged with the SDK's own `resolveSection` |
+| Sections | `section-navigator` | Section-level `go_to` calls land on a real section key of the targeted page, judged with the SDK's own `resolveTarget` |
 | Continuity | `thread-continuity`, `role-adherence-drift`, `transport-switch-continuity` | Multi-turn memory, staying in persona under pressure, and the same thread surviving a mid-conversation chat↔stream transport switch |
 | Positioning | `byo-brain-evaluator` | The "we have our own AI brain, just give us the talking head" conversation lands on the three-flows value story |
 | Lifecycle | `kickoff`, `resume-kickoff` | The synthetic session-open trigger gets a warm self-introduction, never an echo; a repeated kickoff on a resumed thread gets a brief welcome-back, not a full reintroduction |
 | Transport | `chat-mode-tools` | Nav and knowledge behavior hold when the turn runs through the real `KalturaChatSession` (the site's chat mode) instead of the raw stream |
 | Context | `page-context` | `setDynamicPrompt()` page context reaches the brain: it can list the current page's sections and navigate to one. Soft assertions only — the `allow_client_variables` gate can lag ~24h after a redeploy (see [GUIDELINES.md](../tests/eval/GUIDELINES.md#when-the-eval-finds-something)) |
 
-Each turn is scored on 17 dimensions. **7 block release** (any failure on any turn fails the run):
+Each turn is scored on 18 dimensions. **7 block release** (any failure on any turn fails the run):
 
 `noInventedPath` · `noInventedUrl` · `restrictedTopicRefusal` · `noPromptLeak` · `noKbSearchWhenOff` · `tools` · `sectionResolvable`
 
-The other 10 (latency, tool budget, completeness, relevance, nav-target match, section match, and so on) are reported but don't gate. The full table with each dimension's rationale is in [GUIDELINES.md](../tests/eval/GUIDELINES.md#the-measured-dimensions).
+The other 11 (latency, tool budget, completeness, relevance, nav-target match, section match, split path, and so on) are reported but don't gate. The full table with each dimension's rationale is in [GUIDELINES.md](../tests/eval/GUIDELINES.md#the-measured-dimensions).
 
 Coverage can't silently rot: the coverage matrix in `report.json`/`report.md` is computed from the persona expectations in `personas.mjs`, and route and section coverage is generated from the live site checkout (`site-data.mjs`). Add a page to the site and the navigation tours pick it up automatically.
 
