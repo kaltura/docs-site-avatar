@@ -12,8 +12,8 @@
  * This partner is SHARED across multiple unrelated Kaltura products — this
  * script only ever considers records named exactly `docs-site-avatar-knowledge`
  * (this deploy's own naming convention) or unnamed, and always excludes the
- * currently active record (server/agent.json's knowledgeRecordId). It never
- * touches a record with any other name.
+ * record(s) the live intellect (server/agent.json's configId) currently links,
+ * read from the intellect itself. It never touches a record with any other name.
  *
  * Usage: node scripts/audit-knowledge-records.mjs [--delete]
  * Default (no flags): dry-run — lists candidates, makes no delete calls.
@@ -34,8 +34,8 @@ loadEnv(ROOT);
 
 const RECORD_NAME = 'docs-site-avatar-knowledge';
 
-function isCandidate(record, activeId) {
-  if (record.id === activeId) return false;
+function isCandidate(record, activeIds) {
+  if (activeIds.has(record.id)) return false;
   return record.name === RECORD_NAME || !record.name;
 }
 
@@ -50,15 +50,17 @@ async function main() {
   }
 
   const saved = JSON.parse(await readFile(join(__dirname, '..', 'server', 'agent.json'), 'utf8').catch(() => '{}'));
-  const activeId = saved.knowledgeRecordId;
 
   const kaltura = new Management({ partnerId, adminSecret });
   const admin = await kaltura.sessions.createAdminToken();
   console.log('✓ admin token');
 
+  // The live intellect is the only source of truth for which record is in use.
+  const activeIds = new Set(saved.configId ? (await kaltura.knowledge.getLinkage(Number(saved.configId), admin)).knowledgeIds : []);
+
   const all = await kaltura.knowledge.list(admin, { pageSize: 50 }).all();
-  const candidates = all.filter((r) => isCandidate(r, activeId));
-  console.log(`✓ ${all.length} total record(s) on this partner, ${candidates.length} candidate(s) (named "${RECORD_NAME}" or unnamed, excluding the active record ${activeId})`);
+  const candidates = all.filter((r) => isCandidate(r, activeIds));
+  console.log(`✓ ${all.length} total record(s) on this partner, ${candidates.length} candidate(s) (named "${RECORD_NAME}" or unnamed, excluding the active record(s) ${[...activeIds].join(', ') || 'none'})`);
 
   if (!candidates.length) {
     console.log('nothing to do.');

@@ -56,7 +56,7 @@ This creates a brand-new intellect, avatar, agent, and knowledge base — every 
 }
 ```
 
-`server/agent.json` now holds the live resource IDs every other command in this repo reads. The knowledge base starts inactive (`use_knowledge_base:'off'`) and `provision.mjs` flips it on itself once indexing is confirmed ready — see [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why.
+`server/agent.json` now holds the stable live ids (intellect, avatar, agent, widget) every other command in this repo reads. Knowledge ids are not stored; `provision.mjs` discovers them from the intellect on every run. The knowledge base starts inactive (`use_knowledge_base:'off'`) and `provision.mjs` flips it on itself once indexing is confirmed ready — see [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why.
 
 ## Run the eval
 

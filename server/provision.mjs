@@ -16,13 +16,15 @@
  * build-time `nova/sections.json` manifest (one line per page in the SITE MAP
  * prompt: path, then that page's section keys), so the brain only ever picks
  * from real pages and headings. The tool is idempotently upserted by name
- * (see upsertClientTool below). A `--reuse` run
- * deletes the PREVIOUS knowledge category/record/entries (see deleteKnowledge)
- * before wireKnowledge mints a new one, so repeated redeploys (e.g. from CI)
- * don't orphan a fresh corpus on every run — UNLESS the site's docs hash
- * identically to the last successful `--reuse` deploy's (see hashDocs), in
- * which case the existing knowledge category/record/entries are reused as-is
- * and the teardown/re-upload/indexing-wait is skipped entirely.
+ * (see upsertClientTool below). A `--reuse` run discovers the intellect's
+ * CURRENT knowledge corpus live (intellect → record → category → entries, see
+ * discoverKnowledge) and compares the docs fingerprint stored on that category
+ * (`referenceId`, see hashDocs and wireKnowledge) with the docs read from
+ * --site-dir. Same hash: the corpus is reused as-is and the teardown/re-upload/
+ * indexing-wait is skipped. Different hash: the old corpus is deleted (see
+ * deleteKnowledge) before wireKnowledge mints a new one, so repeated redeploys
+ * (e.g. from CI) never orphan a corpus. Nothing about the corpus is written to
+ * disk; server/agent.json holds only the stable ids.
  *
  * Run:  AGENTIC_PARTNER_ID=… AGENTIC_ADMIN_SECRET=… node server/provision.mjs
  *       [--site-dir <path>]                  # read the docs site's src/**\/*.md from
@@ -34,9 +36,9 @@
  *       [--reuse <configId>]                 # update this intellect instead of creating one
  *       [--avatar-id <existingAvatarId>]      # skip preset pick, use this avatar as-is
  *       [--agent-id <existingAgentId>]        # update this agent in place, keep its widgetId
- *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag,
- *         knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, docsHash, provisionedAt },
- *         first backing up any PREVIOUS agent.json to server/agent.json.bak
+ *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag },
+ *         first backing up any PREVIOUS agent.json to server/agent.json.bak.
+ *         A --reuse run with the same ids leaves the file byte-identical.
  * Teardown:  node server/provision.mjs --cleanup
  */
 import { readFile, writeFile } from 'node:fs/promises';
@@ -355,10 +357,9 @@ async function loadDocContent(siteDir, docs) {
 
 /** Deterministic fingerprint of everything the uploaded corpus is derived from: every doc's
  * path + content in load order, the go_to manifest's page/section keys (chunks name them), and
- * CHUNK_FORMAT. Lets provision() recognize "the corpus would come out byte-identical to the last
- * successful --reuse deploy" and skip the expensive knowledge teardown/re-upload/indexing-wait
- * entirely instead of redoing it on every redeploy regardless of whether anything actually
- * changed. */
+ * CHUNK_FORMAT. wireKnowledge stores it in the knowledge category's `referenceId` once every
+ * chunk is uploaded; provision() reads it back from the live category on the next --reuse run
+ * and skips the knowledge teardown/re-upload/indexing-wait when it matches. */
 export function hashDocs(docs, manifest = null) {
   const h = createHash('sha256');
   h.update(`${CHUNK_FORMAT}\n`);
@@ -518,30 +519,30 @@ async function provision() {
   const sectionCount = manifest.pages.reduce((n, p) => n + p.sections.length, 0);
   console.log(`✓ SITE MAP: ${manifest.pages.length} pages, ${sectionCount} sections, ~${estimateTokens(siteMapBlock.value)} tokens`);
 
-  // Redeploying the SAME intellect would otherwise orphan its previous knowledge
-  // category/record/entries — wireKnowledge below always mints a fresh one, and once this
-  // run's ids overwrite agent.json, cleanup can no longer find the old ones. Only tear down
-  // when prevSaved really is a snapshot of the intellect being reused, not stale/unrelated state.
-  const reusingSameIntellect = reuseConfigId && prevSaved.configId === reuseConfigId && (prevSaved.knowledgeRecordId || prevSaved.knowledgeCategoryId);
-  // The docs this intellect is grounded on are read fresh from --site-dir every run, but a
-  // redeploy is often triggered (manually, or by an unrelated provision.mjs code change) with
-  // no actual change to the site's own content. When the fingerprint matches the last successful
-  // --reuse deploy's, the existing knowledge category/record/entries are already correct and
-  // already indexed — skip the teardown/re-upload/indexing-wait below entirely.
-  const knowledgeUnchanged = reusingSameIntellect && prevSaved.docsHash === docsHash;
+  // The corpus an intellect is grounded on is discovered from the intellect itself, never from
+  // a file: agent.json holds only stable ids, so a --reuse redeploy has nothing volatile to
+  // commit back. The docs are read fresh from --site-dir every run, but a redeploy is often
+  // triggered (manually, or by an unrelated provision.mjs change) with no change to the site's
+  // own content. When the fingerprint stored on the live category matches, the existing
+  // category/record/entries are already correct and indexed, so the teardown/re-upload/
+  // indexing-wait below is skipped entirely.
+  const live = reuseConfigId ? await discoverKnowledge(admin, reuseConfigId) : null;
+  const knowledgeUnchanged = !!live && live.docsHash === docsHash;
 
   let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, indexed;
   const INDEX_WAIT_MS = 80000; // matches the "45-90s+" async_search_knowledge_base estimate below
   if (knowledgeUnchanged) {
-    ({ knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds } = prevSaved);
+    [knowledgeRecordId] = live.recordIds;
+    [knowledgeCategoryId] = live.categoryIds;
+    knowledgeEntryIds = live.entryIds;
     indexed = true;
     console.log(`✓ docs unchanged since last deploy (hash ${docsHash.slice(0, 12)}…) — reusing knowledge category ${knowledgeCategoryId}/record ${knowledgeRecordId}, skipping teardown/re-upload/indexing poll`);
   } else {
-    if (reusingSameIntellect) {
-      console.log('✓ removing previous knowledge corpus before re-upload (avoids orphaning it)');
-      await deleteKnowledge(admin, prevSaved);
+    if (live) {
+      console.log(`✓ removing previous knowledge corpus before re-upload (record ${live.recordIds.join(',') || 'none'}, category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries)`);
+      await deleteKnowledge(admin, live);
     }
-    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs, manifest));
+    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs, manifest, docsHash));
 
     // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
     // send it in that single add/update call alongside knowledge_ids — never as a follow-up
@@ -723,16 +724,15 @@ async function provision() {
     console.log('✓ resolved widget', widgetId);
   }
 
-  const out = {
-    configId, avatarId: avatar.id, agentId, widgetId, tag: TAG,
-    knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, docsHash,
-    provisionedAt: new Date().toISOString(),
-  };
+  // Stable ids only. Everything about the knowledge corpus is discoverable from the intellect
+  // (see discoverKnowledge), so a --reuse run with the same ids rewrites this file byte-for-byte.
+  const out = { configId, avatarId: avatar.id, agentId, widgetId, tag: TAG };
   const prevAgentJson = await readFile(OUT, 'utf8').catch(() => null);
   if (prevAgentJson !== null) await writeFile(`${OUT}.bak`, prevAgentJson);
   await writeFile(OUT, JSON.stringify(out, null, 2) + '\n');
   console.log('\n✅ provisioned. Wrote', OUT);
   console.log(JSON.stringify(out, null, 2));
+  console.log(`knowledge: category ${knowledgeCategoryId}, record ${knowledgeRecordId}, ${knowledgeEntryIds.length} entries, docs hash ${docsHash}`);
   console.log(knowledgeUnchanged
     ? `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, reused as-is (docs unchanged, no re-upload/wait needed).`
     : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after polling kaltura.knowledge.entryStatus() for indexing completion (budget ${INDEX_WAIT_MS / 1000}s).`);
@@ -774,8 +774,10 @@ async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budgetMs) {
  * follow-up patch — because provision() polls this record's indexing status (see the poll loop
  * right after this call returns) and resolves `capabilities.use_knowledge_base` BEFORE the
  * intellect is ever created/updated.
+ * The category's `referenceId` is set to `docsHash` only after the LAST chunk uploaded, so a
+ * run that dies mid-upload leaves a category with no hash and the next --reuse run replaces it.
  */
-async function wireKnowledge(admin, docs, manifest) {
+async function wireKnowledge(admin, docs, manifest, docsHash) {
   const category = await kaltura.knowledge.findOrCreateCategory({ name: `${TAG}-knowledge-${Date.now()}` }, admin);
   console.log('✓ knowledge category', category.id);
 
@@ -804,34 +806,101 @@ async function wireKnowledge(admin, docs, manifest) {
     console.log(`✓ uploaded ${doc.file} to knowledge category (${sections.length} chunk${sections.length === 1 ? '' : 's'})`);
   }
 
+  await ovp(admin, 'category', 'update', { id: category.id, category: { objectType: 'KalturaCategory', referenceId: docsHash } });
+  console.log(`✓ stored docs hash ${docsHash.slice(0, 12)}… on category ${category.id}`);
+
   return { categoryId: category.id, recordId: record.id, entryIds };
 }
 
+const OVP_BASE = 'https://www.kaltura.com/api_v3';
+
+/** One Kaltura OVP API call (`service.action`) with the admin KS, throwing on a KalturaAPIException.
+ * The vendored SDK's Knowledge helpers cover records and entries, but not `category.get/update`. */
+async function ovp(admin, service, action, params = {}) {
+  const res = await fetch(`${OVP_BASE}/service/${service}/action/${action}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiVersion: '19.14.0', format: 1, ks: admin.ks, ...params }),
+  });
+  const data = await res.json();
+  if (data?.objectType === 'KalturaAPIException') {
+    const err = new Error(`${service}.${action}: ${data.code} ${data.message}`);
+    err.code = data.code;
+    throw err;
+  }
+  return data;
+}
+
 /**
- * Delete one knowledge record + its category + every entry uploaded into it — the exact
- * teardown `cleanup()` already did for the CURRENTLY saved corpus, factored out so `provision()`
- * can run the same teardown on the PREVIOUS corpus before `wireKnowledge()` mints a new one.
- * Without this, every `--reuse` redeploy would silently orphan the prior category/record/entries
- * (each replaced in agent.json, so cleanup can no longer even find them afterward).
+ * Reduce what discoverKnowledge fetched to the ids provision()/cleanup() act on, plus the docs
+ * hash the corpus was uploaded from. The hash is trusted only when the intellect links exactly
+ * one record holding exactly one category; anything else (a half-finished upload, a hand-edited
+ * intellect) reports `docsHash: null` so the next --reuse run replaces the whole set.
+ * @param {Array<{id:number, categoryIds:number[]}>} records one per linked knowledge record
+ * @param {Array<{id:number, referenceId?:string|null, entryIds:string[]}>} categories
+ * @returns {{recordIds:number[], categoryIds:number[], entryIds:string[], docsHash:string|null}}
  */
-async function deleteKnowledge(admin, { knowledgeRecordId, knowledgeCategoryId, knowledgeEntryIds } = {}) {
-  if (knowledgeRecordId) {
+export function knowledgeState(records, categories) {
+  const recordIds = records.map((r) => r.id);
+  const categoryIds = categories.map((c) => c.id);
+  const entryIds = categories.flatMap((c) => c.entryIds);
+  const docsHash = records.length === 1 && categories.length === 1 ? categories[0].referenceId || null : null;
+  return { recordIds, categoryIds, entryIds, docsHash };
+}
+
+/**
+ * Discover an intellect's knowledge corpus from the platform: intellect → knowledge_ids →
+ * each record's source categoryIds → each category's referenceId (the docs hash) and entries.
+ * Returns null when the intellect links no knowledge record at all.
+ */
+async function discoverKnowledge(admin, configId) {
+  const { knowledgeIds } = await kaltura.knowledge.getLinkage(configId, admin);
+  if (!knowledgeIds.length) return null;
+  const records = [];
+  const categories = [];
+  for (const id of knowledgeIds) {
+    const record = await kaltura.knowledge.getRecord(id, admin);
+    const categoryIds = (record?.config?.sources || []).flatMap((s) => s.categoryIds || []).map(Number);
+    records.push({ id, categoryIds });
+    for (const categoryId of categoryIds) {
+      const category = await ovp(admin, 'category', 'get', { id: categoryId }).catch((e) => {
+        if (e.code === 'CATEGORY_NOT_FOUND') return null;
+        throw e;
+      });
+      if (!category) continue;
+      const entryIds = [];
+      for await (const entry of kaltura.knowledge.listCategoryEntries(categoryId, admin, { pageSize: 500 })) entryIds.push(entry.id);
+      categories.push({ id: categoryId, referenceId: category.referenceId ?? null, entryIds });
+    }
+  }
+  const state = knowledgeState(records, categories);
+  console.log(`✓ discovered knowledge of intellect ${configId}: record ${state.recordIds.join(',')}, category ${state.categoryIds.join(',') || 'none'}, ${state.entryIds.length} entries, docs hash ${state.docsHash ? `${state.docsHash.slice(0, 12)}…` : 'none'}`);
+  return state;
+}
+
+/**
+ * Delete knowledge records + their categories + every entry in them: the teardown `cleanup()`
+ * runs on the intellect's current corpus, factored out so `provision()` can run the same teardown
+ * on the outgoing corpus before `wireKnowledge()` mints a new one. Without this, every `--reuse`
+ * redeploy would silently orphan the prior category/record/entries.
+ */
+async function deleteKnowledge(admin, { recordIds = [], categoryIds = [], entryIds = [] } = {}) {
+  for (const recordId of recordIds) {
     // force:true: the outgoing record is still referenced by the intellect being updated at the
     // exact point this runs (the update call that repoints it to the new record goes out later
     // in this same run — see provision()), so the SDK's default in-use guard would otherwise
     // throw knowledge_in_use on every --reuse redeploy.
-    await kaltura.knowledge.deleteRecord(knowledgeRecordId, admin, { confirmPermanent: true, force: true }).catch((e) => console.error('knowledge-record', e.code));
+    await kaltura.knowledge.deleteRecord(recordId, admin, { confirmPermanent: true, force: true }).catch((e) => console.error('knowledge-record', recordId, e.code));
   }
-  if (knowledgeCategoryId) {
-    const calls = (knowledgeEntryIds || []).map((entryId) => ({ service: 'baseentry', action: 'delete', entryId }));
-    calls.push({ service: 'category', action: 'delete', id: knowledgeCategoryId });
+  if (categoryIds.length) {
+    const calls = entryIds.map((entryId) => ({ service: 'baseentry', action: 'delete', entryId }));
+    for (const id of categoryIds) calls.push({ service: 'category', action: 'delete', id });
     const body = { apiVersion: '19.14.0', format: 1 };
     calls.forEach((c, i) => { body[i] = { ks: admin.ks, ...c }; });
     try {
-      await fetch('https://www.kaltura.com/api_v3/service/multirequest', {
+      await fetch(`${OVP_BASE}/service/multirequest`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-    } catch (e) { console.error('knowledge-category', knowledgeCategoryId, e.message); }
+    } catch (e) { console.error('knowledge-category', categoryIds.join(','), e.message); }
   }
 }
 
@@ -850,6 +919,12 @@ async function cleanup(opts = {}) {
   const admin = dryRun ? null : await kaltura.sessions.createAdminToken();
   if (dryRun) console.log(`(dry run — no API calls will be made; scope: ${only.join(', ')})`);
 
+  // The corpus is only reachable through the intellect, so discover it before that is deleted.
+  let knowledge = null;
+  if (wants('knowledge') && saved.configId && !dryRun) {
+    knowledge = await discoverKnowledge(admin, Number(saved.configId)).catch((e) => { console.error('knowledge-discovery', e.code || e.message); return null; });
+  }
+
   if (wants('agent') && saved.agentId) {
     if (dryRun) log(`agent:${saved.agentId}`);
     else await kaltura.agents.delete(saved.agentId, admin, { confirmPermanent: true, allowProtected: true }).then(() => log('agent')).catch((e) => console.error('agent', e.code));
@@ -862,20 +937,14 @@ async function cleanup(opts = {}) {
     if (dryRun) log(`intellect:${saved.configId}`);
     else await kaltura.intellects.delete(Number(saved.configId), admin, { confirmPermanent: true }).then(() => log('intellect')).catch((e) => console.error('intellect', e.code));
   }
-  if (wants('knowledge') && (saved.knowledgeRecordId || saved.knowledgeCategoryId)) {
+  if (wants('knowledge') && saved.configId) {
     if (dryRun) {
-      if (saved.knowledgeRecordId) log(`knowledge-record:${saved.knowledgeRecordId}`);
-      if (saved.knowledgeCategoryId) {
-        log(`knowledge-category:${saved.knowledgeCategoryId}`);
-        (saved.knowledgeEntryIds || []).forEach((id) => log(`knowledge-entry:${id}`));
-      }
-    } else {
-      await deleteKnowledge(admin, saved);
-      if (saved.knowledgeRecordId) log(`knowledge-record:${saved.knowledgeRecordId}`);
-      if (saved.knowledgeCategoryId) {
-        log(`knowledge-category:${saved.knowledgeCategoryId}`);
-        (saved.knowledgeEntryIds || []).forEach((id) => log(`knowledge-entry:${id}`));
-      }
+      log(`knowledge-of-intellect:${saved.configId}`);
+    } else if (knowledge) {
+      await deleteKnowledge(admin, knowledge);
+      knowledge.recordIds.forEach((id) => log(`knowledge-record:${id}`));
+      knowledge.categoryIds.forEach((id) => log(`knowledge-category:${id}`));
+      log(`knowledge-entries:${knowledge.entryIds.length}`);
     }
   }
   console.log(dryRun ? '(dry run) would clean up:' : '✓ cleaned up:', deleted.join(', ') || 'nothing');
@@ -893,7 +962,9 @@ const USAGE = `Usage: node server/provision.mjs [options]
   --reuse <configId>                    Update this intellect instead of creating one
   --avatar-id <existingAvatarId>        Skip preset pick, use this avatar as-is
   --agent-id <existingAgentId>          Update this agent in place, keep its widgetId
-  --cleanup                             Delete the resources recorded in server/agent.json
+  --cleanup                             Delete the agent/avatar/intellect recorded in
+                                         server/agent.json plus the knowledge corpus the
+                                         intellect links (discovered live, not from the file)
   --dry-run                             With --cleanup: list what would be deleted, make
                                          no API calls
   --only <types>                        With --cleanup: limit to a comma-separated subset

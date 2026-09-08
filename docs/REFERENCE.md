@@ -13,7 +13,7 @@
 | `scripts/audit-knowledge-records.mjs` | Finds and cleans up leaked Knowledge-record shells left behind by `--reuse` redeploys (see ARCHITECTURE.md's "Known limitations") |
 | `vendor/sdk/` | Gitignored — the fetched SDK source, populated by `postinstall` |
 | `server/provision.mjs` | Creates/redeploys/tears down Nova's live intellect, avatar, agent, knowledge base |
-| `server/agent.json` | Committed — the live resource IDs `provision.mjs` writes and every other command (incl. `redeploy.yml`) reads |
+| `server/agent.json` | Committed — the five stable live ids (`configId`, `avatarId`, `agentId`, `widgetId`, `tag`) `provision.mjs` writes and every other command (incl. `redeploy.yml`) reads. Knowledge ids are discovered live from the intellect, not stored here |
 | `.github/workflows/redeploy.yml` | CI: redeploy Nova in place, gated behind the `production` environment |
 | `.github/workflows/eval.yml` | CI: run the eval suite against whatever `redeploy.yml` most recently produced |
 | `docs/GETTING-STARTED.md` | Tutorial — zero to a passing eval run |
@@ -55,7 +55,7 @@
 | `--reuse <configId>` | Update this intellect instead of creating one |
 | `--avatar-id <existingAvatarId>` | Skip the preset pick, use this avatar as-is |
 | `--agent-id <existingAgentId>` | Update this agent in place, keeping its `widgetId` |
-| `--cleanup` | Delete the resources recorded in `server/agent.json` |
+| `--cleanup` | Delete the agent/avatar/intellect recorded in `server/agent.json` plus the knowledge corpus the intellect links (discovered live) |
 | `--dry-run` | With `--cleanup`: list what would be deleted, make no API calls |
 | `--only <types>` | With `--cleanup`: limit to a comma-separated subset of `agent,avatar,intellect,knowledge` |
 | `--help` | Print usage and exit, no API calls |
@@ -87,7 +87,7 @@ Exits non-zero when `summary.healthy` is false (any release-blocking failure or 
 | *(none)* | Dry run — list candidate leaked records, make no delete calls |
 | `--delete` | Attempt `deleteRecord` on every candidate; a 500 on a previously-indexed shell is expected and reported separately from a clean delete |
 
-Only considers records named exactly `docs-site-avatar-knowledge` (this deploy's own naming convention) or unnamed, and always excludes the active record (`server/agent.json`'s `knowledgeRecordId`) — this partner is shared with other unrelated products, so it never touches a record with any other name.
+Only considers records named exactly `docs-site-avatar-knowledge` (this deploy's own naming convention) or unnamed, and always excludes the record(s) the live intellect (`server/agent.json`'s `configId`) currently links — this partner is shared with other unrelated products, so it never touches a record with any other name.
 
 ## GitHub Actions workflows
 

@@ -42,9 +42,11 @@ and coordinate disclosure before any public write-up.
   with required reviewers, so a human approves before the job can read
   `AGENTIC_ADMIN_SECRET` and reshape the live agent. `eval.yml` only reads
   the live agent conversationally and never provisions anything.
-- `server/agent.json` (the provisioned resource IDs) is committed on
+- `server/agent.json` (the stable provisioned ids) is committed on
   purpose — it's runtime state, not a secret, and CI needs it on disk to
   redeploy the same live intellect/agent/avatar rather than minting new ones.
+  Knowledge ids are discovered live from the intellect, so CI never writes
+  the file back.
 - Nova's knowledge base starts `use_knowledge_base:'off'` and `provision.mjs`
   flips it on automatically once indexing is confirmed ready — see
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why, and for the
