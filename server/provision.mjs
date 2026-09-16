@@ -36,9 +36,10 @@
  *       [--reuse <configId>]                 # update this intellect instead of creating one
  *       [--avatar-id <existingAvatarId>]      # skip preset pick, use this avatar as-is
  *       [--agent-id <existingAgentId>]        # update this agent in place, keep its widgetId
- *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag },
- *         first backing up any PREVIOUS agent.json to server/agent.json.bak.
- *         A --reuse run with the same ids leaves the file byte-identical.
+ *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag, ...any
+ *         hand-recorded extra fields, carried forward as-is }, first backing up any
+ *         PREVIOUS agent.json to server/agent.json.bak. A --reuse run with the same
+ *         ids leaves the file byte-identical.
  * Teardown:  node server/provision.mjs --cleanup
  */
 import { readFile, writeFile } from 'node:fs/promises';
@@ -728,7 +729,9 @@ async function provision() {
 
   // Stable ids only. Everything about the knowledge corpus is discoverable from the intellect
   // (see discoverKnowledge), so a --reuse run with the same ids rewrites this file byte-for-byte.
-  const out = { configId, avatarId: avatar.id, agentId, widgetId, tag: TAG };
+  // Any extra top-level field (e.g. lifecycle rule ids recorded by hand) isn't managed by this
+  // script — carry it forward from prevSaved instead of silently dropping it on every redeploy.
+  const out = { ...prevSaved, configId, avatarId: avatar.id, agentId, widgetId, tag: TAG };
   const prevAgentJson = await readFile(OUT, 'utf8').catch(() => null);
   if (prevAgentJson !== null) await writeFile(`${OUT}.bak`, prevAgentJson);
   await writeFile(OUT, JSON.stringify(out, null, 2) + '\n');
