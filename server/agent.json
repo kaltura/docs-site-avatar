@@ -3,5 +3,11 @@
   "avatarId": "6a955af4f4403d3916950dd4",
   "agentId": "4bda1787-9a0a-4f80-94b7-0c1927e36815",
   "widgetId": "1_g7ntgoq2",
-  "tag": "docs-site-avatar"
+  "tag": "docs-site-avatar",
+  "lifecycle": {
+    "topicInsightId": "6aaaf4c3bf8048087f63e198",
+    "customInsightId": "6aaaf4c3bf8048087f63e19b",
+    "extractRuleId": "6aaaf4c44d17049cb4518b7b",
+    "emailRuleId": "6aaaf4c44d17049cb4518b7e"
+  }
 }
