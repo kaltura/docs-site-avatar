@@ -21,12 +21,12 @@ Nothing is mocked. The harness drives the same provisioned brain the public site
 
 ## Coverage
 
-19 adversarial personas across 9 categories. Every turn is scored on every applicable dimension:
+24 adversarial personas across 9 categories. Every turn is scored on every applicable dimension:
 
 | Category | Personas | What it stresses |
 |---|---|---|
 | Trust & safety | `restricted-topics`, `adversarial` | Pricing/licensing refusals with no smuggled figures, prompt-injection resistance, no prompt leaks |
-| Navigation | `site-navigator-1/2`, `nonexistent-pages`, `single-nav-discipline` | Every real page reachable, no invented routes, one nav call per turn, no narration of what the screen is doing |
+| Navigation | `site-navigator-1..N` (every manifest page, in tours of at most 8 turns so one bad first turn can't poison a whole tour), `nonexistent-pages`, `single-nav-discipline` | Every real page reachable, no invented routes, one nav call per turn, no narration of what the screen is doing |
 | Knowledge | `facts-and-scope`, `knowledge-depth`, `release-delta-depth`, `personalization-and-threads-depth` | Answers grounded in the site's own pages, knowledge-base retrieval depth |
 | Sections | `section-navigator` | Section-level `go_to` calls land on a real section key of the targeted page, judged with the SDK's own `resolveTarget` |
 | Continuity | `thread-continuity`, `role-adherence-drift`, `transport-switch-continuity` | Multi-turn memory, staying in persona under pressure, and the same thread surviving a mid-conversation chat↔stream transport switch |
