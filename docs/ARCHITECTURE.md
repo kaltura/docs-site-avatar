@@ -23,7 +23,7 @@ Nova's first words follow the SDK's opening model. The intellect's `opening_phra
 | Visitor starts with | Site sends | Nova's first words |
 |---|---|---|
 | Video, no question yet | `nova_greet: 'yes'`, no kickoff | The scripted intro. The site sets `nova_greet` back to `''` once `connect()` resolves. |
-| A chip click or a typed line, either mode | `nova_greet: ''`, `kickoff: { text, echo: true }` | The answer to that question. The question is the thread's first turn. |
+| A chip click or a typed line, either mode | `nova_greet: ''`, `kickoff: { text, echo: false }` | The answer to that question. The question is the thread's first turn. The site shows it in the transcript itself, on click. |
 | Chat, no question yet | `nova_greet: ''`, `kickoff: KICKOFF_TRIGGER` | A model-written welcome. Chat has no opening turn. |
 | `switchMode('avatar')` or a reconnect | no new kickoff | Silence, because the thread is not new. |
 
