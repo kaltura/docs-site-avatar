@@ -13,12 +13,17 @@
  * turn" from a genuinely empty reply).
  *
  * Spiral handling differs from transport.mjs by design: `sendText()` drains the whole stream
- * before returning, so there's no mid-stream abandon point and no recovery resend here —
- * `spiralDetected` is computed post-hoc from the returned segments, `spiralRecovered` is
- * always false, and engine.mjs's 90s turn abort (the `signal` below) is what bounds a live
- * spiral on this path.
+ * before returning, so there's no mid-stream abandon point and no recovery resend here.
+ * `spiralDetected` comes from the session's own `toolSpiralDetected` event (its
+ * `toolSpiralLimit` is set to the same `TOOL_SPIRAL_HARD_LIMIT` transport.mjs uses),
+ * `spiralRecovered` is always false, and engine.mjs's 90s turn abort (the `signal` below)
+ * is what bounds a live spiral on this path.
+ *
+ * One session object is built per turn, so `sessionCompleteOnEnd` is off: the SDK's default
+ * would post a session-completed signal on every `disconnect()`, which would fire lifecycle
+ * completion on every eval turn instead of once per conversation.
  */
-import { KalturaChatSession } from '../../vendor/sdk/src/experience/chat-session.js';
+import { KalturaChatSession } from '../../vendor/sdk/src/experience/index.js';
 import { ksString } from '../../vendor/sdk/src/management/client.js';
 import { TOOL_SPIRAL_HARD_LIMIT } from './transport.mjs';
 
@@ -36,14 +41,18 @@ export async function chatTurn({ management, configId, message, threadId, capabi
     ...(threadId ? { threadId } : {}),
     ...(capabilities ? { capabilities } : {}),
     ...(process.env.AGENTIC_GENIE_URL ? { genieUrl: process.env.AGENTIC_GENIE_URL } : {}),
+    toolSpiralLimit: TOOL_SPIRAL_HARD_LIMIT,
+    sessionCompleteOnEnd: false,
     fetch: fetchImpl,
     logger: () => {},
   });
 
   const toolCalls = [];
   const warnings = [];
+  let spiralDetected = false;
   session.on('toolCall', (call) => toolCalls.push(call));
   session.on('warning', (w) => warnings.push(w));
+  session.on('toolSpiralDetected', () => { spiralDetected = true; });
 
   try {
     session.connect();
@@ -55,7 +64,7 @@ export async function chatTurn({ management, configId, message, threadId, capabi
       threadId: r.threadId ?? threadId ?? null,
       toolCalls,
       rawToolSegCount,
-      spiralDetected: rawToolSegCount >= TOOL_SPIRAL_HARD_LIMIT,
+      spiralDetected,
       spiralRecovered: false,
       warnings,
     };

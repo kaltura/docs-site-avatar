@@ -12,7 +12,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolveSiteDir } from '../../site-root.mjs';
-import { validateSectionsManifest } from '../../vendor/sdk/src/core/site-keys.js';
+import { validateSectionsManifest } from '../../vendor/sdk/src/management/index.js';
 
 // The site's actual published base — the only base a grounded reply may cite (see
 // provision.mjs's BASE_URL); kept here too so probes can validate cited URLs independently.

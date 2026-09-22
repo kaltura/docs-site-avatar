@@ -52,6 +52,7 @@
 |---|---|
 | *(none)* | Create a brand-new intellect, avatar, agent, and widget |
 | `--site-dir <path>` | Read the docs site's `src/**/*.md` from here instead of the default (or set `SITE_REPO_DIR`) |
+| `--sections-file <path>` | Read the `go_to` sections manifest (`nova/sections.json`) from a local site build instead of fetching the published one |
 | `--reuse <configId>` | Update this intellect instead of creating one |
 | `--avatar-id <existingAvatarId>` | Skip the preset pick, use this avatar as-is |
 | `--agent-id <existingAgentId>` | Update this agent in place, keeping its `widgetId` |

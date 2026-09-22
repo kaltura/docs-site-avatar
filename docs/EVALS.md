@@ -21,14 +21,13 @@ Nothing is mocked. The harness drives the same provisioned brain the public site
 
 ## Coverage
 
-24 adversarial personas across 9 categories. Every turn is scored on every applicable dimension:
+24 adversarial personas across 8 categories. Every turn is scored on every applicable dimension:
 
 | Category | Personas | What it stresses |
 |---|---|---|
 | Trust & safety | `restricted-topics`, `adversarial` | Pricing/licensing refusals with no smuggled figures, prompt-injection resistance, no prompt leaks |
-| Navigation | `site-navigator-1..N` (every manifest page, in tours of at most 8 turns so one bad first turn can't poison a whole tour), `nonexistent-pages`, `single-nav-discipline` | Every real page reachable, no invented routes, one nav call per turn, no narration of what the screen is doing |
+| Navigation | `site-navigator-1..N` (every manifest page, in tours of at most 8 turns so one bad first turn can't poison a whole tour), `section-navigator`, `nonexistent-pages`, `single-nav-discipline` | Every real page reachable, no invented routes, one nav call per turn, no narration of what the screen is doing; section-level `go_to` calls land on a real section key of the targeted page, judged with the SDK's own `resolveTarget` |
 | Knowledge | `facts-and-scope`, `knowledge-depth`, `release-delta-depth`, `personalization-and-threads-depth` | Answers grounded in the site's own pages, knowledge-base retrieval depth |
-| Sections | `section-navigator` | Section-level `go_to` calls land on a real section key of the targeted page, judged with the SDK's own `resolveTarget` |
 | Continuity | `thread-continuity`, `role-adherence-drift`, `transport-switch-continuity` | Multi-turn memory, staying in persona under pressure, and the same thread surviving a mid-conversation chat↔stream transport switch |
 | Positioning | `byo-brain-evaluator` | The "we have our own AI brain, just give us the talking head" conversation lands on the three-flows value story |
 | Lifecycle | `kickoff`, `resume-kickoff` | The SDK kickoff that opens a session gets a warm self-introduction, never an echo; a repeated kickoff on a thread with history gets a brief welcome-back, not a full reintroduction |
@@ -48,7 +47,7 @@ Coverage can't silently rot: the coverage matrix in `report.json`/`report.md` is
 - **Live, no mocks.** Real brain, real tool calls, real knowledge retrieval. Slower than fixtures, but the thing being certified is the deployed agent.
 - **pass^k, not pass@k.** `--trials N` re-runs every persona end-to-end N independent times; release-blocking dimensions must pass *all* trials. A turn that passed some trials but not all is marked `🎲 flaky` in the report, which is exactly the signal that separates a regression from run-to-run nondeterminism.
 - **Warm-up gate.** Each run opens with a canary question only the knowledge base can answer, retried up to 20 times a minute apart, because "indexed" does not mean "retrieval is warm". Skip with `--no-warmup` when iterating against an already-warm agent.
-- **Tool-spiral circuit breaker.** The stream transport hard-stops a turn after 6 raw tool segments and records `spiralDetected`/`spiralRecovered`, so a stuck tool loop becomes a scored finding instead of a hung run. The chat transport flags the same condition post-hoc (its `sendText()` drains the whole stream); the engine's 90s per-turn abort bounds a live spiral there.
+- **Tool-spiral circuit breaker.** The stream transport hard-stops a turn after 6 raw tool segments and records `spiralDetected`/`spiralRecovered`, so a stuck tool loop becomes a scored finding instead of a hung run. The chat transport uses `KalturaChatSession`'s own `toolSpiralLimit`/`toolSpiralDetected` at the same limit (its `sendText()` drains the whole stream, so there is no abandon point); the engine's 90s per-turn abort bounds a live spiral there.
 - **Deterministic probes, external judge.** Every probe is a pure function (that's why `npm run test:eval:unit` works offline). Qualitative grading is deliberately not done in-process: `transcript.json` is written for an external LLM judge, whose verdicts fold back in via `--judge verdicts.json`. Rubric guidance: [GUIDELINES.md](../tests/eval/GUIDELINES.md#optional-qualitative-layer--the-external-llm-judge).
 
 ## The tools

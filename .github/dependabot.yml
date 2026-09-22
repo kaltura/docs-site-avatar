@@ -10,7 +10,7 @@ updates:
     schedule:
       interval: "weekly"
 
-  # CI workflows pin GitHub Actions by floating tag (@v4) — Dependabot keeps those
+  # CI workflows pin GitHub Actions by floating tag (@v7) — Dependabot keeps those
   # current.
   - package-ecosystem: "github-actions"
     directory: "/"

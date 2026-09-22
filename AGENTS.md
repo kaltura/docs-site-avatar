@@ -13,7 +13,7 @@ This repo is standalone (it vendors the SDK from jsDelivr, no local checkout nee
 - Zero runtime dependencies, plain ESM, no build step. `npm install`'s `postinstall` vendors the SDK from jsDelivr into gitignored `vendor/sdk/`.
 - Credentials live only in `.env` (gitignored) or CI environment secrets. Never commit a real `AGENTIC_ADMIN_SECRET` or a raw KS token (`djJ8...`). Run `node scripts/scan-secrets.mjs` before any commit touching tracked files.
 - `node server/provision.mjs` with no flags **always creates a brand-new intellect/avatar/agent** — it never touches the live Nova on the public docs site unless you explicitly pass `--reuse <configId> --agent-id <agentId>` read from `server/agent.json`. Safe to run for testing.
-- `server/agent.json` is committed on purpose — it's runtime state (provisioned resource IDs), not a secret.
+- `server/agent.json` is committed on purpose; [SECURITY.md](SECURITY.md) explains why.
 - `tests/eval/` contains real adversarial jailbreak prompts and Nova's exact refusal phrasing, published deliberately as reference material (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). If you add to it, follow [SECURITY.md](SECURITY.md): no real credentials, no other party's private data, nothing crafted to attack a different live system.
 
 ## Commands
