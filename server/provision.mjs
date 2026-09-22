@@ -1,7 +1,7 @@
 /**
  * Provision Nova — the live SDK-docs assistant embedded on the
  * @kaltura/intelligent-agents GitHub Pages site — using the SDK's own
- * Management API. Grounds the intellect on the site's own 16 Diátaxis
+ * Management API. Grounds the intellect on the site's own Diátaxis
  * markdown pages (read directly from the site's `gh-pages-src` checkout,
  * see ../site-root.mjs) via Knowledge Path A (see the design-rules doc-comment
  * in wireKnowledge below), builds a deliberate persona prompt, and creates a
@@ -46,11 +46,12 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Management, SILENT_OPENING } from '../vendor/sdk/src/management/index.js';
-import { findIntellectsReferencingTool } from '../vendor/sdk/src/management/tools.js';
-import { goToTool, siteMapPrompt, SITE_NAV_RULES_PROMPT, SITE_NAV_TOOL_NAME, loadSectionsManifest, estimateTokens } from '../vendor/sdk/src/management/site-nav.js';
-import { validateSectionsManifest, resolvePath } from '../vendor/sdk/src/core/site-keys.js';
-import { lintPersonaIdentity, lintPrompts, PAGE_CONTEXT_PROMPT } from '../vendor/sdk/src/management/prompt-lint.js';
+import {
+  Management, SILENT_OPENING, buildIndexerObjects, findIntellectsReferencingTool,
+  goToTool, siteMapPrompt, SITE_NAV_RULES_PROMPT, SITE_NAV_TOOL_NAME, loadSectionsManifest, estimateTokens,
+  validateSectionsManifest, resolvePath,
+  lintPersonaIdentity, lintPrompts, PAGE_CONTEXT_PROMPT,
+} from '../vendor/sdk/src/management/index.js';
 import { loadEnv } from '../load-env.mjs';
 import { resolveSiteDir, stripSiteDirFlag } from '../site-root.mjs';
 
@@ -826,7 +827,7 @@ async function wireKnowledge(admin, docs, manifest, docsHash) {
         type: 'internal',
         language: 'English',
         categoryIds: [String(category.id)],
-        indexers: [{ type: 3, index_position: 0, strategy: 'EmbedDocumentV1' }],
+        indexers: buildIndexerObjects(['document']),
       }],
     },
   }, admin);
@@ -965,7 +966,7 @@ async function cleanup(opts = {}) {
 
   if (wants('agent') && saved.agentId) {
     if (dryRun) log(`agent:${saved.agentId}`);
-    else await kaltura.agents.delete(saved.agentId, admin, { confirmPermanent: true, allowProtected: true }).then(() => log('agent')).catch((e) => console.error('agent', e.code));
+    else await kaltura.agents.delete(saved.agentId, admin, { confirmPermanent: true }).then(() => log('agent')).catch((e) => console.error('agent', e.code));
   }
   if (wants('avatar') && saved.avatarId) {
     if (dryRun) log(`avatar:${saved.avatarId}`);

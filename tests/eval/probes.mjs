@@ -7,7 +7,7 @@
  * published sections manifest, so the eval judges a call exactly the way the browser-side
  * SiteNavigator would act on it.
  */
-import { normalizePath, resolveTarget } from '../../vendor/sdk/src/core/site-keys.js';
+import { normalizePath, resolveTarget } from '../../vendor/sdk/src/management/index.js';
 import { KICKOFF_TRIGGER } from './personas.mjs';
 
 const LATENCY_TIERS = { snappy: 4000, ok: 6000, slow: 9000 };

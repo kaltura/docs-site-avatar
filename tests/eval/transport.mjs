@@ -2,12 +2,12 @@
  * Headless converse transport for the Nova eval, record-only. Nova's single client tool
  * (`go_to`, see provision.mjs) is fire-and-forget (`waitForResponse:false`): the brain never
  * waits for the browser, so a headless caller has nothing to ACK. This iterates
- * `Conversations#stream()`'s async generator directly (not `send()`, which fully drains before
- * returning) so a spiraling turn can be abandoned the moment it trips the hard limit below.
+ * `Conversations#stream()`'s async generator directly, not `send()`/`collectConverse`, for two
+ * reasons: a spiraling turn can be abandoned the moment it trips the hard limit below, and
+ * `collectConverse` dedups repeated tool calls and caps calls per tool, which would hide the
+ * exact repeats the `singleToolCallPerTurn` probe measures.
  */
-import { parseToolCall, SPIRAL_RECOVERY_PREFIX } from '../../vendor/sdk/src/core/stream.js';
-
-const SPOKEN_TYPES = new Set(['text', 'avatar', 'avatar-filler']);
+import { parseToolCall, segmentKind, SPIRAL_RECOVERY_PREFIX } from '../../vendor/sdk/src/management/index.js';
 
 // KalturaAvatarSession's own circuit breaker (session.js `_checkHardToolSpiral`) was built after
 // a live incident where the brain re-emitted the SAME tool call 438x over 9 minutes with zero
@@ -55,7 +55,7 @@ export async function streamTurn({ management, configId, message, threadId, capa
 
     for await (const seg of gen) {
       if (seg.threadId && !outThreadId) outThreadId = seg.threadId;
-      if (seg.type && SPOKEN_TYPES.has(seg.type) && seg.content) text += seg.content;
+      if (segmentKind(seg) === 'spoken' && seg.content) text += seg.content;
       if (seg.type === 'tool') rawToolSegCount++;
       const call = parseToolCall(seg);
       if (call) toolCalls.push(call);

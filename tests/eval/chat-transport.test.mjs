@@ -75,6 +75,9 @@ test('carries threadId, capabilities, and page_context (via setDynamicPrompt) on
   assert.deepEqual(converse.body.capabilities, { use_knowledge_base: 'on' });
   assert.deepEqual(JSON.parse(converse.body.request_vars.page_context), pageContext);
   assert.equal(r.threadId, 'th_2');
+  // One session object per turn: sessionCompleteOnEnd is off, so disconnect() must not post
+  // session_completed for the thread (that would fire lifecycle completion on every eval turn).
+  assert.ok(!calls.some((c) => c.url.endsWith('/thread/session_completed')), 'no session_completed POST per turn');
 });
 
 test('records go_to with both path and section args, no ACK POST is ever made', async () => {
@@ -87,7 +90,7 @@ test('records go_to with both path and section args, no ACK POST is ever made', 
   assert.ok(!calls.some((c) => c.url.endsWith('/assistant/tool_response')), 'no tool_response POST for a fire-and-forget tool');
 });
 
-test('flags a spiral post-hoc from raw tool segment count, never claims recovery', async () => {
+test('flags a spiral via the session\'s own toolSpiralDetected event, never claims recovery', async () => {
   const segs = Array.from({ length: TOOL_SPIRAL_HARD_LIMIT }, (_, i) => (
     { type: 'tool', content: 'go_to {"path":"/"}', tool_metadata: { id: `tc_${i}` } }
   ));
