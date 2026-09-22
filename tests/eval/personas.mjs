@@ -220,7 +220,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'I want a custom avatar face composed from parts instead of a template — do I need both a face and a background at creation time, or can I add the background later?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['both required', 'both need', 'required together', 'together at create', 'need both'],
+          relevanceAny: ['both required', 'both need', 'required together', 'together at create', 'need both', 'must provide both', 'must pass both', 'both are required', 'requires both', 'both ids together', 'both of their ids'],
         },
         {
           prompt: 'Can avatars.update() change just the background on an existing avatar without touching its current face?',
