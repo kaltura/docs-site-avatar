@@ -215,7 +215,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Can followups.getSuggested be called with a plain end-user session, or do I need an admin key just to list starter questions?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['any ks', 'no admin', "don't need admin", 'do not need admin', 'end user'],
+          relevanceAny: ['any ks', 'any kaltura session', 'no admin', "don't need admin", "don't need an admin", 'do not need admin', 'do not need an admin', 'not require an admin', 'end user', 'end-user'],
         },
         {
           prompt: 'I want a custom avatar face composed from parts instead of a template — do I need both a face and a background at creation time, or can I add the background later?',
