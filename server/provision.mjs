@@ -77,14 +77,22 @@ const DEFAULT_VOICE_ID = '625jGFaa0zTLtQfxwc6Q';
 // class this constant is here to make impossible).
 export const PERSONA_NAME = 'Nova';
 // The intellect's opening_phrase is the single owner of what the avatar says
-// first. Nova opens silently (the SDK's SILENT_OPENING marker) and the site
-// runtime sends KICKOFF_TRIGGER as the SDK `kickoff`, so her first words are
-// a real, prompt-driven greeting. The silence marker carries no name, so
-// lintPersonaIdentity never raises persona_name_mismatch on it.
-export const OPENING_PHRASE = SILENT_OPENING;
-// The first turn the site runtime (connect.js, SDK `kickoff`) and the eval
-// harness (tests/eval/personas.mjs) send. The obeyRules prompt below is keyed
-// on this exact string. Keep all three in sync.
+// first. It is a Jinja template rendered on every avatar join. The site sends
+// NOVA_GREET_VAR = 'yes' only when a visitor starts the avatar without
+// clicking a question pill, so a brand-new thread hears the scripted intro
+// right away. Every other join (a pill click, a reconnect, a switch to avatar
+// on an existing thread, or no variable at all) renders the SDK's
+// SILENT_OPENING. The intro names PERSONA_NAME first, so lintPersonaIdentity
+// checks it against the declared name. A request variable stays on the
+// thread until it is sent again, so the site clears the flag with ''.
+export const NOVA_GREET_VAR = 'nova_greet';
+export const OPENING_INTRO = "Hi, I'm Nova, welcome to the docs. I'm built with this very SDK, so ask me anything about building with it.";
+export const OPENING_PHRASE = `{%- if ${NOVA_GREET_VAR} and sys__is_new_thread -%}${OPENING_INTRO}{%- else -%}${SILENT_OPENING}{%- endif -%}`;
+// The first turn the site runtime (connect.js, SDK `kickoff`) sends when a
+// visitor starts in chat, where there is no opening turn, and that the eval
+// harness (tests/eval/personas.mjs) sends to open a thread. The avatar
+// greeting is the Jinja opening above, not this trigger. The obeyRules
+// prompt below is keyed on this exact string. Keep all three in sync.
 export const KICKOFF_TRIGGER = 'Session started. Greet the visitor.';
 
 const partnerId = process.env.AGENTIC_PARTNER_ID;
@@ -424,7 +432,9 @@ const KEY_FACTS = `
 - Intellect secrets: the management SDK's mgmt.intellects.secrets exposes listNames, has, set, delete, replaceAll, and validate. delete(configId, name, ks, confirm) is permanent and requires confirm = { confirmPermanent: true }.
 - Structured forms: the session method that sends a viewer's structured form answers back to the brain is session.submitStructuredDataForm(values) — it emits the setFormLeadInfo socket event, fire-and-forget with no acknowledgment, and it does not itself make the avatar speak. There is no session.submitForm(). Documented on the Structured Data Forms guide.
 - Connection handshake timing: the SDK waits 5s for the clientConfiguration socket event but 20s for joinComplete (both counted as JoinRoomTimeout) — joinComplete gets the longer budget because the server only emits it after an awaited context-update call that can exceed 5s under load.
-- Opening line and kickoff: the intellect's opening_phrase is the single owner of an agent's first words; leave the avatar's openingPhrase unset (clear a legacy one with avatars.update({id, openingPhrase: null})). Set opening_phrase to the SDK's SILENT_OPENING marker (exported from ./management; isSilentOpening() recognises it and transcripts show it as "[silence]") so the avatar waits instead of speaking a canned line, then pass kickoff (a string, or {text, echo}) to KalturaAvatarSession, KalturaChatSession, or KalturaAgentSession and the SDK sends that first user turn for you as soon as the server accepts input. It goes out exactly once per session object: never again on resume(), a reconnect, or a switchMode() transport. Its user-side echo is dropped from the transcript unless echo: true, and a failed send surfaces as a warning event with code kickoff_failed, never a rejected connect().
+- Opening line: the intellect's opening_phrase is the single owner of an agent's first words; leave the avatar's openingPhrase unset (clear a legacy one with avatars.update({id, openingPhrase: null})). It is a Jinja template, rendered and spoken on every avatar join: first connect, reconnect, switchMode to avatar, and resuming a thread. Guard a greeting with sys__is_new_thread so it never repeats mid-conversation, and wrap every optional client variable in an if test. Every branch must render non-empty text, since an empty render makes the agent speak its default greeting; render the SDK's SILENT_OPENING marker (exported from ./management; isSilentOpening() recognises it, transcripts show "[silence]") for silence. A template that fails to render means the session never starts. So do request variables sent on an avatar join to an intellect that does not allow client variables.
+- Choosing an opening: use a scripted Jinja opening when startup time matters or the prompt or knowledge base is large. Speech starts about a second sooner in live runs, but the line holds the floor for its whole length and cannot be interrupted. Use SILENT_OPENING plus kickoff when the greeting must be model-written, interruptible, or use tools. For a preset question, set a flag variable that makes the template render SILENT_OPENING and send the question as kickoff with echo: true, so the first words are the answer. A request variable sent once stays on the thread until you send it again, so turn a flag off by sending it as an empty string, not by omitting it. Text chat has no opening turn: send a greeting instruction (for example, a hidden first message asking the agent to greet) or the preset question as kickoff there.
+- Kickoff: pass kickoff (a string, or {text, echo}) to KalturaAvatarSession, KalturaChatSession, or KalturaAgentSession and the SDK sends that first user turn as soon as the server accepts input. It goes out exactly once per session object: never again on resume(), a reconnect, or a switchMode() transport. Its user-side echo is dropped from the transcript unless echo: true, and a failed send surfaces as a warning event with code kickoff_failed, never a rejected connect().
 - You, Nova, are yourself a live example of what this SDK builds: provisioned via the SDK's own Management API, grounded on this site's own docs through the SDK's Knowledge feature, and running on the SDK's own Experience runtime.
 `.trim();
 
@@ -630,9 +640,10 @@ async function provision() {
       ].join('\n')),
     ],
     base_directive: buildBaseDirective(),
-    // Silent opening turn: the avatar shows up without a canned line and the
-    // SDK kickoff (KICKOFF_TRIGGER) produces the real greeting. Lives on the
-    // intellect, never on the avatar (the SDK's opening model).
+    // Jinja opening (see OPENING_PHRASE): the scripted intro on an avatar
+    // start without a pill, silent on every other join. KICKOFF_TRIGGER is
+    // the chat-first greeting. Lives on the intellect, never on the avatar
+    // (the SDK's opening model).
     opening_phrase: OPENING_PHRASE,
     // Every one of the 16 real AssistantCapability keys, set explicitly. The
     // hero embed mounts no GenUI renderer (ExperienceRenderer/mountWidget) —
@@ -685,8 +696,9 @@ async function provision() {
 
   // Same warning-only shape for the prompt list itself: duplicate keys,
   // {{variables}} the allow_client_variables gate would silently drop,
-  // reserved-name collisions. `page_context` is the one client variable
-  // Nova sends (PAGE_CONTEXT_PROMPT above), so it's declared as known.
+  // reserved-name collisions. `page_context` is the one client variable a
+  // prompt uses (PAGE_CONTEXT_PROMPT above), so it's declared as known.
+  // `nova_greet` is read only by opening_phrase, which lintPrompts does not scan.
   const promptLint = lintPrompts(intellectBody.prompts, {
     allowClientVariables: intellectBody.allow_client_variables,
     knownVars: ['page_context'],

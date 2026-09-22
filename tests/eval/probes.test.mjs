@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   toolNames, probeLatency, probeTools, probeCompleteness, probeRelevance,
   probeSingleToolCallPerTurn, probeNoKbSearchWhenOff, probeRestrictedTopicRefusal,
-  probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probeNoInventedUrl, probeNoInventedPath,
+  probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probePillAnswer, probeNoInventedUrl, probeNoInventedPath,
   probeNavPathMatch, probeNoInventedApi, probeSectionResolvable, probeSectionMatch, probeNoScreenNarration, probeNoSplitPath,
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
@@ -287,6 +287,33 @@ test('resumeKickoff: echoing the literal kickoff trigger fails', () => {
   assert.equal(r.echoedTrigger, true);
 });
 
+/* pill answer (a pill question as the thread's first message) */
+test('pillAnswer: not applicable when unset', () => {
+  assert.equal(probePillAnswer({}, "Hi, I'm Nova!"), null);
+});
+test('pillAnswer: a direct answer passes', () => {
+  const r = probePillAnswer({ isPillFirst: true }, 'Here is the shortest start: import Management from the management entry point, then call provision() with your partner id.');
+  assert.equal(r.pass, true);
+});
+test('pillAnswer: a short greeting word before the answer still passes', () => {
+  const r = probePillAnswer({ isPillFirst: true }, 'Hi! Import the experience entry point and create a KalturaAgentSession, then call connect().');
+  assert.equal(r.pass, true);
+});
+test('pillAnswer: a self-introduction fails', () => {
+  const r = probePillAnswer({ isPillFirst: true }, "Hi, I'm Nova, your guide to this SDK. Here's a quick example: import the management entry point.");
+  assert.equal(r.pass, false);
+  assert.equal(r.selfIntroduced, true);
+});
+test('pillAnswer: a bare greeting plus invitation fails', () => {
+  const r = probePillAnswer({ isPillFirst: true }, 'Hello there! Welcome to the docs. What would you like to know?');
+  assert.equal(r.pass, false);
+  assert.equal(r.greetingOnly, true);
+});
+test('pillAnswer: an empty reply fails', () => {
+  const r = probePillAnswer({ isPillFirst: true }, '');
+  assert.equal(r.pass, false);
+});
+
 /* invented URL */
 test('noInventedUrl: no URLs in reply passes trivially', () => {
   const r = probeNoInventedUrl('just plain text', siteData);
@@ -544,6 +571,15 @@ test('DIMENSIONS and RELEASE_BLOCKING are consistent', () => {
   for (const d of RELEASE_BLOCKING) assert.ok(DIMENSIONS.includes(d));
   assert.ok(DIMENSIONS.includes('noSplitPath'));
   assert.ok(!RELEASE_BLOCKING.includes('noSplitPath'));
+});
+
+test('scoreTurn: a greeting instead of the pill answer is healthy but flagged on the soft pillAnswer dimension', () => {
+  assert.ok(DIMENSIONS.includes('pillAnswer'));
+  assert.ok(!RELEASE_BLOCKING.includes('pillAnswer'));
+  const turn = { expectation: { isPillFirst: true }, latencyMs: 1000, text: "Hi, I'm Nova! What would you like to know?", toolCalls: [] };
+  const scored = scoreTurn(turn, siteData);
+  assert.equal(scored.healthy, true);
+  assert.deepEqual(scored.failed, ['pillAnswer']);
 });
 
 test('scoreTurn: a split path is healthy but flagged on the soft noSplitPath dimension', () => {

@@ -7,9 +7,10 @@
  * `go_to` turn per manifest page and a sampled set of section-level turns, so the dataset can
  * never drift from what Nova can actually navigate to.
  */
-/** The session's first turn. Must equal server/provision.mjs KICKOFF_TRIGGER (the obeyRules
- * prompt is keyed on it) and the site runtime's SDK `kickoff` text; provision.test.mjs asserts
- * the first of those. */
+/** The chat-first session's first turn. Must equal server/provision.mjs KICKOFF_TRIGGER (the
+ * obeyRules prompt is keyed on it) and the site runtime's SDK `kickoff` text for a chat start;
+ * provision.test.mjs asserts the first of those. The avatar greeting is the intellect's Jinja
+ * opening, which these text transports never render. */
 export const KICKOFF_TRIGGER = 'Session started. Greet the visitor.';
 
 const NAV_PHRASE_TEMPLATES = [
@@ -145,9 +146,22 @@ export function buildPersonas(siteData) {
     {
       id: 'kickoff',
       category: 'lifecycle',
-      persona: 'Fresh session — the SDK kickoff arrives, no real visitor message yet',
+      skipWarmup: true,
+      persona: 'Fresh chat-first session: the greeting kickoff arrives, no real visitor message yet',
       turns: [
         { prompt: KICKOFF_TRIGGER, isKickoff: true, forbidTools: ['go_to'] },
+      ],
+    },
+    {
+      // A pill click: the site sends the pill's question as the kickoff (echoed) and the Jinja
+      // opening renders silent, so the pill text is the thread's very first message and Nova's
+      // first words must be the answer, not a greeting. No KICKOFF_TRIGGER warmup.
+      id: 'pill-first',
+      category: 'lifecycle',
+      skipWarmup: true,
+      persona: 'Visitor who opens Nova by clicking a suggested-question pill',
+      turns: [
+        { prompt: 'Show me a quick code example to get started.', isPillFirst: true, relevanceAny: ['import', 'connect', 'session', 'management', 'experience'] },
       ],
     },
     {
@@ -450,14 +464,14 @@ export function buildPersonas(siteData) {
       ],
     },
     {
-      // The continued-thread branch of the kickoff rule: a kickoff that lands on a thread which
-      // already has history (an app that seeds `threadId` and reconnects). The engine's warmup
-      // already sent this thread's FIRST kickoff, so the trigger turn below is the repeated,
+      // The continued-thread branch of the kickoff rule: a chat-first kickoff that lands on a
+      // thread which already has history (a session that reopens a saved `threadId`). The
+      // engine's warmup already sent this thread's FIRST kickoff, so the trigger turn below is the repeated,
       // mid-thread one — Nova must greet back briefly (resumeKickoff probe), never rerun her
       // full first-visit self-introduction as if the visitor were new.
       id: 'resume-kickoff',
       category: 'lifecycle',
-      persona: 'Continued thread — the kickoff arrives again on a thread that already has history',
+      persona: 'Continued thread: the chat-first greeting kickoff arrives again on a thread that already has history',
       turns: [
         { prompt: 'What are the two main entry points of this SDK?', relevanceAny: ['management', 'experience'] },
         { prompt: KICKOFF_TRIGGER, isResumeKickoff: true, skipCompleteness: true, forbidTools: ['go_to'] },

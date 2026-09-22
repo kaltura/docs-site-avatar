@@ -234,6 +234,20 @@ export function probeResumeKickoff(expectation, text) {
   return { pass: !echoedTrigger && !reIntroduced, echoedTrigger, reIntroduced };
 }
 
+/** A pill click sends the pill's question as the thread's first message, with a silent opening,
+ * so Nova's first words must be the answer. Fails on a self-introduction ("I'm Nova...") or on a
+ * reply made only of greeting and invitation sentences ("Hi there! What would you like to know?"). */
+const GREETING_SENTENCE = /^(hi|hello|hey|greetings|welcome|good (morning|afternoon|evening))\b/;
+const INVITE_SENTENCE = /\b(what would you like|what can i help|how can i help|ask me anything|feel free to ask|what brings you|happy to help)\b/;
+export function probePillAnswer(expectation, text) {
+  if (!expectation.isPillFirst) return null;
+  const lower = (text || '').toLowerCase();
+  const selfIntroduced = /\bi['’]m nova\b|\bi am nova\b|\bmy name is nova\b|\bthis is nova\b/.test(lower);
+  const sentences = lower.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
+  const greetingOnly = sentences.every((x) => GREETING_SENTENCE.test(x) || INVITE_SENTENCE.test(x));
+  return { pass: !selfIntroduced && !greetingOnly, selfIntroduced, greetingOnly };
+}
+
 function extractUrls(text) {
   return [...(text || '').matchAll(/https?:\/\/[^\s)"'>]+/g)].map((m) => m[0]);
 }
@@ -414,6 +428,7 @@ export const DIMENSIONS = [
   'noPromptLeak',
   'kickoffHandling',
   'resumeKickoff',
+  'pillAnswer',
   'noInventedUrl',
   'noInventedPath',
   'noSplitPath',
@@ -453,6 +468,7 @@ export function scoreTurn(turn, siteData) {
     noPromptLeak: probeNoPromptLeak(expectation, text),
     kickoffHandling: probeKickoffHandling(expectation, text),
     resumeKickoff: probeResumeKickoff(expectation, text),
+    pillAnswer: probePillAnswer(expectation, text),
     noInventedUrl: probeNoInventedUrl(text, siteData),
     noInventedPath: probeNoInventedPath(toolCalls, siteData),
     noSplitPath: probeNoSplitPath(toolCalls, siteData),

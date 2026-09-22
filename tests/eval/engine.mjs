@@ -125,12 +125,12 @@ export async function runEval({ management, configId, siteData, personas, trials
     const personaResults = [];
     for (const p of personas) {
       onEvent({ type: 'persona-start', personaId: p.id, persona: p.persona, turnCount: p.turns.length, trial, trials });
-      // Every real session sends KICKOFF_TRIGGER exactly once, as message #1 — replicate that
-      // warmup so each persona's real first question lands on an already-opened thread. The
-      // 'kickoff' persona's own listed turn IS that exact trigger, so warming up separately would
-      // double-send it in one thread — a message shape production never produces — skip the
-      // warmup there and let its single turn be the thread's actual first message.
-      const skipWarmup = p.id === 'kickoff';
+      // A chat-first session sends KICKOFF_TRIGGER exactly once, as message #1. Replicate that
+      // warmup so each persona's real first question lands on an already-opened thread. A
+      // persona with skipWarmup starts the thread with its own first turn instead: 'kickoff'
+      // (its turn IS the trigger, so a warmup would double-send it) and 'pill-first' (a pill
+      // click sends the pill question as the first message, never the trigger).
+      const skipWarmup = p.skipWarmup === true;
       // Warm up on the persona's own transport so a chat-mode persona's thread is opened by the
       // same client stack its first real turn uses — matching what a real chat session does.
       const personaTransport = p.transport === 'chat' ? 'chat' : 'stream';
