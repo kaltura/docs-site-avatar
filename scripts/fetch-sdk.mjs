@@ -15,9 +15,9 @@ import { fileURLToPath } from 'node:url';
 const REPO = 'kaltura/intelligent-agents-sdk';
 const SRC_SUBTREE = 'src';
 // SDK version pin -- keep in sync with: intelligent-agents-sdk-site/src/assets/nova/sdk.js
-// (SDK_TAG constant), intelligent-agents-sdk-site/src/index.md (quick-start jsDelivr pin), and
-// KEY_FACTS in server/provision.mjs (the release tag Nova quotes to visitors).
-const DEFAULT_TAG = 'v1.23.0';
+// (SDK_TAG constant) and intelligent-agents-sdk-site/src/index.md (quick-start jsDelivr pin).
+// server/provision.mjs reads the tag this script stamps into vendor/sdk/.sdk-tag.
+const DEFAULT_TAG = 'v1.23.1';
 const DEST_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'vendor', 'sdk');
 
 function parseArgs(argv, env) {
