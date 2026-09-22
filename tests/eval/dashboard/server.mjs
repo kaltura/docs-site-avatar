@@ -39,7 +39,11 @@ const partnerId = process.env.AGENTIC_PARTNER_ID;
 const adminSecret = process.env.AGENTIC_ADMIN_SECRET;
 if (!partnerId || !adminSecret) { console.error('Set AGENTIC_PARTNER_ID + AGENTIC_ADMIN_SECRET.'); process.exit(2); }
 
-const management = new Management({ partnerId, adminSecret });
+const management = new Management({
+  partnerId,
+  adminSecret,
+  ...(process.env.AGENTIC_GENIE_URL ? { genieUrl: process.env.AGENTIC_GENIE_URL } : {}),
+});
 const agent = JSON.parse(await readFile(join(APP_ROOT, 'server', 'agent.json'), 'utf8'));
 const siteData = await loadSiteData();
 const PERSONAS = buildPersonas(siteData);

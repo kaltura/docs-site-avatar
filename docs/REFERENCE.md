@@ -21,7 +21,7 @@
 | `docs/ARCHITECTURE.md` | Explanation — why the repo and the eval harness are built this way |
 | `docs/REFERENCE.md` | This file |
 | `tests/eval/GUIDELINES.md` | Dimensions, blocking rationale, pass@k vs pass^k, coverage contract, triage guide |
-| `tests/eval/transport.mjs` | Wire layer — tool-call self-ACKing, spiral circuit breaker |
+| `tests/eval/transport.mjs` | Wire layer — record-only `Conversations.stream()` turns, spiral circuit breaker |
 | `tests/eval/chat-transport.mjs` | Wire layer, chat mode — same contract, driven through the SDK's real `KalturaChatSession` |
 | `tests/eval/engine.mjs` | Run layer — `runTurn`/`runEval`/trial merging |
 | `tests/eval/probes.mjs` | Scoring layer — pure per-dimension check functions, `DIMENSIONS`, `RELEASE_BLOCKING` |
@@ -109,7 +109,7 @@ Everything a fresh clone needs is in `.env.example`; this table is what each one
 | `AGENTIC_PARTNER_ID` | Yes | Partner ID for every `Management` call (`provision.mjs`, `run.mjs`, the dashboard) |
 | `AGENTIC_ADMIN_SECRET` | Yes | Admin secret paired with the partner ID above. Never commit a real value |
 | `SITE_REPO_DIR` | No | Overrides the default docs-site checkout path `site-root.mjs` resolves to. Flag (`--site-dir`) takes precedence over this; this takes precedence over the default sibling checkout (`../intelligent-agents-sdk-site`) |
-| `AGENTIC_GENIE_URL` | No | Overrides the Genie conversation backend both eval transports talk to (`transport.mjs` ACK posts, `chat-transport.mjs`'s `KalturaChatSession`). Defaults to production |
+| `AGENTIC_GENIE_URL` | No | Overrides the conversation backend both eval transports talk to: the `Management` client behind `transport.mjs` and the dashboard, and `chat-transport.mjs`'s `KalturaChatSession`. Defaults to production |
 | `NOVA_DASHBOARD_PORT` | No | Port for `npm run eval:dashboard`. Defaults to `8093`. The dashboard also accepts a positional CLI arg (`node tests/eval/dashboard/server.mjs 9000`), checked before this env var |
 
 ## Artifact file shapes

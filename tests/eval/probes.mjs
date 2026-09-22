@@ -8,6 +8,7 @@
  * SiteNavigator would act on it.
  */
 import { normalizePath, resolveTarget } from '../../vendor/sdk/src/core/site-keys.js';
+import { KICKOFF_TRIGGER } from './personas.mjs';
 
 const LATENCY_TIERS = { snappy: 4000, ok: 6000, slow: 9000 };
 
@@ -211,22 +212,24 @@ export function probeNoPromptLeak(expectation, text) {
   return { pass: leaked.length === 0, leaked };
 }
 
+/** The kickoff text without its trailing punctuation, lowercased: what an echo looks like. */
+const KICKOFF_ECHO = KICKOFF_TRIGGER.toLowerCase().replace(/[.!?]+$/, '');
+
 export function probeKickoffHandling(expectation, text) {
   if (!expectation.isKickoff) return null;
   const lower = (text || '').toLowerCase();
-  const echoedTrigger = lower.includes('hi, start session');
+  const echoedTrigger = lower.includes(KICKOFF_ECHO);
   const introducedSelf = lower.includes('nova');
   return { pass: !echoedTrigger && introducedSelf, echoedTrigger, introducedSelf };
 }
 
-/** The mirror of kickoffHandling for a REPEATED kickoff on a thread that already has history —
- * what a page reload or a returning visitor produces on the site's resumed thread. The rule
- * (provision.mjs obeyRules) is: greet back briefly, never rerun the full first-visit
+/** The mirror of kickoffHandling for a REPEATED kickoff on a thread that already has history.
+ * The rule (provision.mjs obeyRules) is: greet back briefly, never rerun the full first-visit
  * self-introduction. Fails on a re-introduction ("I'm Nova...") or on echoing the trigger. */
 export function probeResumeKickoff(expectation, text) {
   if (!expectation.isResumeKickoff) return null;
   const lower = (text || '').toLowerCase();
-  const echoedTrigger = lower.includes('hi, start session');
+  const echoedTrigger = lower.includes(KICKOFF_ECHO);
   const reIntroduced = /\bi['’]m nova\b|\bi am nova\b|\bmy name is nova\b/.test(lower);
   return { pass: !echoedTrigger && !reIntroduced, echoedTrigger, reIntroduced };
 }

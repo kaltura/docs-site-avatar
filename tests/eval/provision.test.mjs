@@ -10,11 +10,21 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
-  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
+  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
+const { SILENT_OPENING } = await import('../../vendor/sdk/src/management/index.js');
+const { KICKOFF_TRIGGER: EVAL_KICKOFF_TRIGGER } = await import('./personas.mjs');
+
+/* opening model: the intellect owns a silent opening, the kickoff produces the greeting */
+test('opening: OPENING_PHRASE is the SDK silent-opening marker', () => {
+  assert.equal(OPENING_PHRASE, SILENT_OPENING);
+});
+test('opening: the eval sends the exact kickoff the obeyRules prompt is keyed on', () => {
+  assert.equal(EVAL_KICKOFF_TRIGGER, KICKOFF_TRIGGER);
+});
 
 /* fileForUrl */
 test('fileForUrl: strips slashes and appends .md', () => {
@@ -397,8 +407,8 @@ test('hashDocs: folds CHUNK_FORMAT in, so a chunker change alone invalidates the
 });
 
 /* persona identity lint (issue #32) — Nova's real shape: PERSONA_NAME is declared
-   via the `name` prompt, not via a name-bearing openingPhrase (hers is the SSML
-   silence tag OPENING_PHRASE). This proves lintPersonaIdentity's declared-name-alone
+   via the `name` prompt, not via a name-bearing opening phrase (hers is the SDK's
+   silent-opening marker). This proves lintPersonaIdentity's declared-name-alone
    drift check stays clean against what provision() actually sends today. */
 test('persona identity lint: Nova\'s real shape (name-only, no name-bearing openingPhrase) is clean', () => {
   const r = lintPersonaIdentity({

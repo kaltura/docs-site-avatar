@@ -55,7 +55,11 @@ const HISTORY = join(ART, 'history');
 loadEnv(ROOT);
 
 const agent = JSON.parse(await readFile(join(ROOT, 'server', 'agent.json'), 'utf8'));
-const management = new Management({ partnerId: process.env.AGENTIC_PARTNER_ID, adminSecret: process.env.AGENTIC_ADMIN_SECRET });
+const management = new Management({
+  partnerId: process.env.AGENTIC_PARTNER_ID,
+  adminSecret: process.env.AGENTIC_ADMIN_SECRET,
+  ...(process.env.AGENTIC_GENIE_URL ? { genieUrl: process.env.AGENTIC_GENIE_URL } : {}),
+});
 const siteData = await loadSiteData();
 const PERSONAS = buildPersonas(siteData);
 

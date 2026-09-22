@@ -256,7 +256,7 @@ test('kickoffHandling: warm intro without echoing the trigger passes', () => {
   assert.equal(r.pass, true);
 });
 test('kickoffHandling: echoing the literal kickoff trigger fails', () => {
-  const r = probeKickoffHandling({ isKickoff: true }, 'You said hi, start session! How can I help?');
+  const r = probeKickoffHandling({ isKickoff: true }, 'You said "Session started. Greet the visitor." How can I help?');
   assert.equal(r.pass, false);
 });
 test('kickoffHandling: never introducing herself as Nova fails', () => {
@@ -282,7 +282,7 @@ test('resumeKickoff: rerunning the full self-introduction fails', () => {
   assert.equal(r.reIntroduced, true);
 });
 test('resumeKickoff: echoing the literal kickoff trigger fails', () => {
-  const r = probeResumeKickoff({ isResumeKickoff: true }, 'You said hi, start session! again.');
+  const r = probeResumeKickoff({ isResumeKickoff: true }, 'You said "session started. greet the visitor" again.');
   assert.equal(r.pass, false);
   assert.equal(r.echoedTrigger, true);
 });
