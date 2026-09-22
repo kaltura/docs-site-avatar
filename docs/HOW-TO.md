@@ -104,7 +104,7 @@ Run a full `node tests/eval/run.mjs` afterward to confirm the new dimension beha
 Check the SDK's own changelog in the sibling `intelligent-agents-sdk` repo first, for any breaking change between your current pinned tag and the one you're bumping to.
 
 ```bash
-node scripts/fetch-sdk.mjs --tag v1.23.0 --force
+node scripts/fetch-sdk.mjs --tag vX.Y.Z --force
 ```
 
 Or set `SDK_TAG` in the environment and re-run `npm run fetch-sdk` without `--tag`. There's no build step to catch an incompatible SDK API change at compile time, so re-run the unit tests and a full live eval afterward:

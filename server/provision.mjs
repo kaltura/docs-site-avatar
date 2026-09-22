@@ -42,6 +42,7 @@
  *         ids leaves the file byte-identical.
  * Teardown:  node server/provision.mjs --cleanup
  */
+import { readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -399,16 +400,15 @@ async function loadManifest(sectionsFile) {
 /** Small, ALWAYS-in-prompt facts about the SDK itself — defense-in-depth for the
  * questions every visitor asks first, so they never depend on RAG retrieval
  * quality.
- * The quick-start pin below is a 4th SDK-version-pin location, alongside
- * intelligent-agents-sdk-site/src/assets/nova/sdk.js (SDK_TAG),
- * intelligent-agents-sdk-site/src/index.md (quick-start jsDelivr pin), and
- * this repo's scripts/fetch-sdk.mjs (DEFAULT_TAG) — check-sdk-pin-sync.mjs
- * only covers the site repo's two, so bump this one by hand on every release. */
+ * The release tag Nova quotes is read from the vendored SDK's own stamp
+ * (vendor/sdk/.sdk-tag, written by scripts/fetch-sdk.mjs), so it can never
+ * drift from the SDK this script actually imports. */
+const SDK_TAG = readFileSync(join(ROOT, 'vendor', 'sdk', '.sdk-tag'), 'utf8').trim();
 const KEY_FACTS = `
 - Package: @kaltura/intelligent-agents — a zero-runtime-dependency JavaScript SDK (ESM + JSDoc) for building and operating Kaltura Agentic Avatars.
 - Two entry points: ./management (provision/configure/measure agents, server-side) and ./experience (the live socket+WHEP runtime, browser).
 - Optional plugin subpaths that don't bloat the base runtime: ./experience/presenter (deck-walkthrough), ./experience/genui (widget rendering), ./experience/analytics (KAVA events), ./experience/noise-suppressor (AudioWorklet noise gate).
-- Distribution: @kaltura/intelligent-agents is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is v1.23.0 (.../gh/kaltura/intelligent-agents-sdk@v1.23.0/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
+- Distribution: @kaltura/intelligent-agents is private on npm by design — the SDK ships to browsers via jsDelivr's GitHub-CDN mode, no npm install needed. Pin a git tag for a stable, forever-cached import — the current release, and the tag the home page's quick-start pins, is ${SDK_TAG} (.../gh/kaltura/intelligent-agents-sdk@${SDK_TAG}/src/experience/index.js); @latest is fine only for quick prototyping, never for production.
 - Conversations run over two interchangeable transports: KalturaAvatarSession (live avatar video over WebRTC + socket) and KalturaChatSession (text-only over HTTP streaming — no camera, mic, or WebRTC at all). KalturaAgentSession wraps both and can switch mid-conversation with switchMode(), keeping the same thread, memory, tools, and request variables — the modeChanged event reports threadContinuity: true when the conversation carried over.
 - Client-supplied request_vars sent WITH a converse message are gated: the intellect must have allow_client_variables set to true (toggle via intellects.setClientVariablesEnabled). With the gate off the turn fails SILENTLY as an empty reply — no error reaches the wire on either transport, because the server rejects after the response stream has opened. Both experience session classes emit a once-per-session warning event (code empty_turn_with_request_vars, naming the offending keys); the management SDK's converse helpers surface a typed client_variables_disabled error only in the pre-stream case. Reserved sys__ variables (like sys__user_id) are server-injected every turn and rejected if a client tries to set them, regardless of that gate.
 - License: MIT. No Kaltura account is needed to read, fork, or build on the source; a Kaltura account with the Agentic Avatar feature enabled is needed to call the live APIs it wraps.
