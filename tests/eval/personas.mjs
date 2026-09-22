@@ -153,7 +153,7 @@ export function buildPersonas(siteData) {
       ],
     },
     {
-      // A pill click: the site sends the pill's question as the kickoff (echoed) and the Jinja
+      // A pill click: the site sends the pill's question as the kickoff (not echoed) and the Jinja
       // opening renders silent, so the pill text is the thread's very first message and Nova's
       // first words must be the answer, not a greeting. No KICKOFF_TRIGGER warmup.
       id: 'pill-first',
