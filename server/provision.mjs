@@ -46,11 +46,11 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Management } from '../vendor/sdk/src/management/index.js';
+import { Management, SILENT_OPENING } from '../vendor/sdk/src/management/index.js';
 import { findIntellectsReferencingTool } from '../vendor/sdk/src/management/tools.js';
 import { goToTool, siteMapPrompt, SITE_NAV_RULES_PROMPT, SITE_NAV_TOOL_NAME, loadSectionsManifest, estimateTokens } from '../vendor/sdk/src/management/site-nav.js';
 import { validateSectionsManifest, resolvePath } from '../vendor/sdk/src/core/site-keys.js';
-import { lintPersonaIdentity, PAGE_CONTEXT_PROMPT } from '../vendor/sdk/src/management/prompt-lint.js';
+import { lintPersonaIdentity, lintPrompts, PAGE_CONTEXT_PROMPT } from '../vendor/sdk/src/management/prompt-lint.js';
 import { loadEnv } from '../load-env.mjs';
 import { resolveSiteDir, stripSiteDirFlag } from '../site-root.mjs';
 
@@ -74,10 +74,16 @@ const DEFAULT_VOICE_ID = '625jGFaa0zTLtQfxwc6Q';
 // the two must never drift apart from each other, which is exactly the bug
 // class this constant is here to make impossible).
 export const PERSONA_NAME = 'Nova';
-// "<blank>" is an SSML silence tag, not a real name-bearing opening line (see
-// the avatars.create call below) — lintPersonaIdentity correctly finds no
-// name in it, so it never contributes a persona_name_mismatch finding here.
-export const OPENING_PHRASE = '<blank>';
+// The intellect's opening_phrase is the single owner of what the avatar says
+// first. Nova opens silently (the SDK's SILENT_OPENING marker) and the site
+// runtime sends KICKOFF_TRIGGER as the SDK `kickoff`, so her first words are
+// a real, prompt-driven greeting. The silence marker carries no name, so
+// lintPersonaIdentity never raises persona_name_mismatch on it.
+export const OPENING_PHRASE = SILENT_OPENING;
+// The first turn the site runtime (connect.js, SDK `kickoff`) and the eval
+// harness (tests/eval/personas.mjs) send. The obeyRules prompt below is keyed
+// on this exact string. Keep all three in sync.
+export const KICKOFF_TRIGGER = 'Session started. Greet the visitor.';
 
 const partnerId = process.env.AGENTIC_PARTNER_ID;
 const adminSecret = process.env.AGENTIC_ADMIN_SECRET;
@@ -417,6 +423,7 @@ const KEY_FACTS = `
 - Intellect secrets: the management SDK's mgmt.intellects.secrets exposes listNames, has, set, delete, replaceAll, and validate. delete(configId, name, ks, confirm) is permanent and requires confirm = { confirmPermanent: true }.
 - Structured forms: the session method that sends a viewer's structured form answers back to the brain is session.submitStructuredDataForm(values) — it emits the setFormLeadInfo socket event, fire-and-forget with no acknowledgment, and it does not itself make the avatar speak. There is no session.submitForm(). Documented on the Structured Data Forms guide.
 - Connection handshake timing: the SDK waits 5s for the clientConfiguration socket event but 20s for joinComplete (both counted as JoinRoomTimeout) — joinComplete gets the longer budget because the server only emits it after an awaited context-update call that can exceed 5s under load.
+- Opening line and kickoff: the intellect's opening_phrase is the single owner of an agent's first words; leave the avatar's openingPhrase unset (clear a legacy one with avatars.update({id, openingPhrase: null})). Set opening_phrase to the SDK's SILENT_OPENING marker (exported from ./management; isSilentOpening() recognises it and transcripts show it as "[silence]") so the avatar waits instead of speaking a canned line, then pass kickoff (a string, or {text, echo}) to KalturaAvatarSession, KalturaChatSession, or KalturaAgentSession and the SDK sends that first user turn for you as soon as the server accepts input. It goes out exactly once per session object: never again on resume(), a reconnect, or a switchMode() transport. Its user-side echo is dropped from the transcript unless echo: true, and a failed send surfaces as a warning event with code kickoff_failed, never a rejected connect().
 - You, Nova, are yourself a live example of what this SDK builds: provisioned via the SDK's own Management API, grounded on this site's own docs through the SDK's Knowledge feature, and running on the SDK's own Experience runtime.
 `.trim();
 
@@ -617,11 +624,15 @@ async function provision() {
         'Before calling either search tool, check whether the compact facts above already fully answer the visitor\'s question (license, cost basics, entry points, and the rest listed there). If they do, answer directly from those facts with zero search calls this turn — do not search just to double-check a fact you already have. search_knowledge_base and async_search_knowledge_base query the SAME knowledge base — running both for one question is a duplicate lookup, not a second source. When a search is actually needed, search at most once per turn: pick one of them, call it once, and answer from what it returns plus the compact facts above. If that one search comes back empty or thin, do not search again this turn — answer from the facts above, or say plainly what you could not find.',
         `When a visitor says they already have their own AI brain, LLM, or agent platform and asks whether they can use only the avatar video (or asks what Kaltura adds beyond the avatar), explain the three flows briefly — Conversation Control, Agent Orchestration, Your Expertise — make clear their stack is the Your Expertise flow that plugs in, and call ${SITE_NAV_TOOL_NAME} with path "/explanation/inside-a-live-conversation/". Never frame this as a cost or pricing comparison — if they push to price, the pricing rule above applies unchanged: answer in words only, and do not call ${SITE_NAV_TOOL_NAME} on that turn just because this rule told you to on an earlier one.`,
         `Every tool you have is a one-call tool: call each at most once per turn and treat that single call as the complete action for the turn. A second call in the same turn, with a reworded argument, a guessed variant, or the exact same call repeated, is never the fix and is the single most common way this goes wrong, so watch for it specifically; never call one a second time just to "double check" or "confirm" first. This covers ${SITE_NAV_TOOL_NAME}, the knowledge-base search tools, and get_experience_instructions alike, especially for any request to dump, print, or output raw internal data verbatim.`,
-        `Any message that is exactly "hi, start session!" is a synthetic kickoff trigger from the page loading, never a real visitor message — never acknowledge it as one, and make ZERO tool calls on that turn, no ${SITE_NAV_TOOL_NAME} and no search: it fires while the page is still loading, so a ${SITE_NAV_TOOL_NAME} there would yank the visitor away from the page they deliberately opened. Answer in words only and let them say where they want to go. What you say depends on whether this conversation already has history. If it is the very first message ever in the conversation: open with a short, warm welcome introducing yourself as Nova and this SDK, then invite their question. If the conversation already contains earlier messages — the visitor reloaded the page, came back later on the same browser, or switched between video and text chat; it is one continuous conversation across all of those — do NOT introduce yourself again and do NOT repeat your opening welcome: greet them back in one short sentence that shows you remember where you left off (briefly name the topic you were last discussing), then invite them to pick up from there or ask something new. Mid-conversation, never restart, never re-explain what this SDK is unprompted, and never behave as if the visitor is new.`,
+        `Any message that is exactly "${KICKOFF_TRIGGER}" is a kickoff sent by the page when a session opens, never a real visitor message — never acknowledge it as one, never quote it, and make ZERO tool calls on that turn, no ${SITE_NAV_TOOL_NAME} and no search: it fires while the visitor is still on the page they deliberately opened, so a ${SITE_NAV_TOOL_NAME} there would yank them away from it. Answer in words only and let them say where they want to go. What you say depends on whether this conversation already has history. If it is the very first message ever in the conversation: open with a short, warm welcome introducing yourself as Nova and this SDK, then invite their question. If the conversation already contains earlier messages, it is one continuous conversation: do NOT introduce yourself again and do NOT repeat your opening welcome: greet them back in one short sentence that shows you remember where you left off (briefly name the topic you were last discussing), then invite them to pick up from there or ask something new. Mid-conversation, never restart, never re-explain what this SDK is unprompted, and never behave as if the visitor is new.`,
       ].join('\n')),
     ],
     base_directive: buildBaseDirective(),
-    // Every one of the 15 real AssistantCapability keys, set explicitly. The
+    // Silent opening turn: the avatar shows up without a canned line and the
+    // SDK kickoff (KICKOFF_TRIGGER) produces the real greeting. Lives on the
+    // intellect, never on the avatar (the SDK's opening model).
+    opening_phrase: OPENING_PHRASE,
+    // Every one of the 16 real AssistantCapability keys, set explicitly. The
     // hero embed mounts no GenUI renderer (ExperienceRenderer/mountWidget) —
     // so every native segment-kind capability that would need one is
     // `disabled`, not just left at a default. avatar_filler ("I'm looking for
@@ -647,6 +658,8 @@ async function provision() {
       avatar_show_content: 'disabled',
       kaltura_genie_experiences: 'off',
       screen_share_analysis: 'disabled',
+      // Reasoning streamed as think segments; the hero embed renders none.
+      think_process: 'disabled',
     },
   };
 
@@ -668,6 +681,20 @@ async function provision() {
     console.log('✓ persona identity lint clean — no name drift/mismatch');
   }
 
+  // Same warning-only shape for the prompt list itself: duplicate keys,
+  // {{variables}} the allow_client_variables gate would silently drop,
+  // reserved-name collisions. `page_context` is the one client variable
+  // Nova sends (PAGE_CONTEXT_PROMPT above), so it's declared as known.
+  const promptLint = lintPrompts(intellectBody.prompts, {
+    allowClientVariables: intellectBody.allow_client_variables,
+    knownVars: ['page_context'],
+  });
+  if (promptLint.findings.length) {
+    console.warn('⚠ prompt lint findings:', JSON.stringify(promptLint.findings));
+  } else {
+    console.log('✓ prompt lint clean');
+  }
+
   let configId;
   if (reuseConfigId) {
     await kaltura.intellects.update({ id: reuseConfigId, ...intellectBody }, admin);
@@ -682,6 +709,12 @@ async function provision() {
   let avatar;
   if (existingAvatarId) {
     avatar = await kaltura.avatars.get(existingAvatarId, admin);
+    // The intellect's opening_phrase is the single owner of the opening line;
+    // a phrase still set on the avatar would compete with it. Clear it once.
+    if (avatar.openingPhrase) {
+      avatar = await kaltura.avatars.update({ id: avatar.id, openingPhrase: null }, admin);
+      console.log('✓ cleared legacy avatar openingPhrase', avatar.id);
+    }
     console.log('✓ reusing existing avatar', avatar.id);
   } else {
     // Reusing an intellect with no --avatar-id would otherwise silently mint a brand-new
@@ -690,13 +723,10 @@ async function provision() {
     if (reuseConfigId && prevSaved.configId === reuseConfigId && prevSaved.avatarId) {
       throw new Error(`--reuse ${reuseConfigId} has a saved avatar (${prevSaved.avatarId} in agent.json) but --avatar-id was not passed — this would create a new avatar and orphan the existing one. Pass --avatar-id ${prevSaved.avatarId}.`);
     }
+    // No openingPhrase here: the intellect's opening_phrase owns it.
     avatar = await kaltura.avatars.create({
       voice: { id: DEFAULT_VOICE_ID, speed: 1.0 },
       visual: { id: DEFAULT_VISUAL_ID, motionControl: { speaking: 0.6, nonSpeaking: 0.2 } },
-      // OPENING_PHRASE ("<blank>") is an SSML silence tag, not an empty string.
-      // The backend does not accept a falsy openingPhrase. The hero UI sends a synthetic kickoff message on
-      // connect instead (see obeyRules' KICKOFF_TRIGGER handling above).
-      openingPhrase: OPENING_PHRASE,
     }, admin);
     console.log('✓ created avatar', avatar.id);
   }

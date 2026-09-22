@@ -7,7 +7,10 @@
  * `go_to` turn per manifest page and a sampled set of section-level turns, so the dataset can
  * never drift from what Nova can actually navigate to.
  */
-export const KICKOFF_TRIGGER = 'hi, start session!';
+/** The session's first turn. Must equal server/provision.mjs KICKOFF_TRIGGER (the obeyRules
+ * prompt is keyed on it) and the site runtime's SDK `kickoff` text; provision.test.mjs asserts
+ * the first of those. */
+export const KICKOFF_TRIGGER = 'Session started. Greet the visitor.';
 
 const NAV_PHRASE_TEMPLATES = [
   (t) => `Can you take me to the "${t}" page?`,
@@ -138,7 +141,7 @@ export function buildPersonas(siteData) {
     {
       id: 'kickoff',
       category: 'lifecycle',
-      persona: 'Fresh page load — synthetic kickoff trigger, no real visitor message yet',
+      persona: 'Fresh session — the SDK kickoff arrives, no real visitor message yet',
       turns: [
         { prompt: KICKOFF_TRIGGER, isKickoff: true, forbidTools: ['go_to'] },
       ],
@@ -443,14 +446,14 @@ export function buildPersonas(siteData) {
       ],
     },
     {
-      // The returning-visitor guarantee: the site persists the threadId per browser and a page
-      // reload re-sends the synthetic kickoff trigger on that SAME resumed thread. The engine's
-      // warmup already sent this thread's FIRST kickoff, so the trigger turn below is the
-      // repeated, mid-thread one — Nova must greet back briefly (resumeKickoff probe), never
-      // rerun her full first-visit self-introduction as if the visitor were new.
+      // The continued-thread branch of the kickoff rule: a kickoff that lands on a thread which
+      // already has history (an app that seeds `threadId` and reconnects). The engine's warmup
+      // already sent this thread's FIRST kickoff, so the trigger turn below is the repeated,
+      // mid-thread one — Nova must greet back briefly (resumeKickoff probe), never rerun her
+      // full first-visit self-introduction as if the visitor were new.
       id: 'resume-kickoff',
       category: 'lifecycle',
-      persona: 'Returning visitor — a page reload re-sends the kickoff trigger on a resumed thread with history',
+      persona: 'Continued thread — the kickoff arrives again on a thread that already has history',
       turns: [
         { prompt: 'What are the two main entry points of this SDK?', relevanceAny: ['management', 'experience'] },
         { prompt: KICKOFF_TRIGGER, isResumeKickoff: true, skipCompleteness: true, forbidTools: ['go_to'] },
