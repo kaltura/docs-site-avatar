@@ -445,7 +445,7 @@ test('hashDocs: folds CHUNK_FORMAT in, so a chunker change alone invalidates the
   assert.notEqual(hashDocs([{ file: 'index.md', markdown: '# Home' }]), digest);
 });
 
-/* persona identity lint (issue #32) — Nova's real shape: PERSONA_NAME is declared via the
+/* persona identity lint (issue #32). Nova's real shape: PERSONA_NAME is declared via the
    `name` prompt and the Jinja opening's intro branch says "I'm Nova". The lint reads the whole
    template, so this proves it stays clean against what provision() actually sends. */
 test('persona identity lint: Nova\'s real shape (name prompt + Jinja opening) is clean', () => {
