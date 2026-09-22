@@ -102,18 +102,22 @@ export function buildPersonas(siteData) {
   const pages = manifest.pages;
   const titled = pages.map((p) => ({ page: p, title: pageTitle(p, routes) }));
 
-  // Even-sized tours (no one-turn straggler at the end): 49 pages → 7 tours of 7, not 6×8 + 1.
+  // Split into the fewest tours that fit NAV_TOUR_MAX_TURNS, then level them so
+  // no two tours differ by more than one turn. A remainder never becomes a
+  // one- or two-turn straggler at the end; it is spread across the first tours.
   const tourCount = Math.max(1, Math.ceil(titled.length / NAV_TOUR_MAX_TURNS));
-  const tourSize = Math.ceil(titled.length / tourCount);
+  const baseSize = Math.floor(titled.length / tourCount);
+  const oversized = titled.length % tourCount;
   const navTours = [];
-  for (let start = 0; start < titled.length; start += tourSize) {
-    const slice = titled.slice(start, start + tourSize);
+  for (let start = 0, t = 0; start < titled.length; t += 1) {
+    const slice = titled.slice(start, start + baseSize + (t < oversized ? 1 : 0));
     navTours.push({
       id: `site-navigator-${navTours.length + 1}`,
       category: 'navigation',
       persona: `Visitor browsing the site, manifest pages ${start + 1}-${start + slice.length}`,
       turns: slice.map(({ page, title }, i) => navTurn(page, title, start + i)),
     });
+    start += slice.length;
   }
 
   const withSections = titled.filter(({ page }) => page.sections.length);
