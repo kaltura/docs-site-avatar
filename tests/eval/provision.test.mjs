@@ -10,17 +10,56 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
-  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
+  buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, OPENING_INTRO, NOVA_GREET_VAR, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
-const { SILENT_OPENING } = await import('../../vendor/sdk/src/management/index.js');
+const { SILENT_OPENING, isSilentOpening } = await import('../../vendor/sdk/src/management/index.js');
 const { KICKOFF_TRIGGER: EVAL_KICKOFF_TRIGGER } = await import('./personas.mjs');
 
-/* opening model: the intellect owns a silent opening, the kickoff produces the greeting */
-test('opening: OPENING_PHRASE is the SDK silent-opening marker', () => {
-  assert.equal(OPENING_PHRASE, SILENT_OPENING);
+/* opening model: a Jinja opening_phrase. The scripted intro plays only when the site sends the
+   greet flag on a brand-new thread; every other join renders the SDK's silent-opening marker. */
+const OPENING_SHAPE = /^\{%- if (\w+) and (\w+) -%\}([\s\S]*)\{%- else -%\}([\s\S]*)\{%- endif -%\}$/;
+/** Renders the one if/else shape OPENING_PHRASE uses, with Jinja truthiness (undefined and '' are falsy). */
+function renderOpening(template, vars) {
+  const m = template.match(OPENING_SHAPE);
+  assert.ok(m, 'OPENING_PHRASE keeps the single whitespace-controlled if/else shape');
+  const [, a, b, then, otherwise] = m;
+  return vars[a] && vars[b] ? then : otherwise;
+}
+test('opening: OPENING_PHRASE is one whitespace-controlled if/else, guarded on the greet flag and sys__is_new_thread', () => {
+  const [, a, b] = OPENING_PHRASE.match(OPENING_SHAPE);
+  assert.equal(a, NOVA_GREET_VAR);
+  assert.equal(b, 'sys__is_new_thread');
+  assert.equal(OPENING_PHRASE, OPENING_PHRASE.trim(), 'no whitespace outside the tags');
+  assert.equal((OPENING_PHRASE.match(/\{%/g) || []).length, 3, 'if, else, endif only');
+  assert.equal((OPENING_PHRASE.match(/\{%-/g) || []).length, 3, 'every tag strips whitespace on its left');
+  assert.equal((OPENING_PHRASE.match(/-%\}/g) || []).length, 3, 'every tag strips whitespace on its right');
+});
+test('opening: no bare {{variable}} anywhere, so a missing variable can never reach speech', () => {
+  assert.doesNotMatch(OPENING_PHRASE, /\{\{|\}\}/);
+});
+test('opening: the greet flag on a new thread renders the intro', () => {
+  assert.equal(renderOpening(OPENING_PHRASE, { [NOVA_GREET_VAR]: 'yes', sys__is_new_thread: true }), OPENING_INTRO);
+});
+test('opening: the intro is non-empty spoken text that opens with the persona self-introduction', () => {
+  assert.ok(OPENING_INTRO.trim().length > 0);
+  assert.match(OPENING_INTRO, new RegExp(`^[^.!?]*\\bI'm ${PERSONA_NAME}\\b`));
+  assert.doesNotMatch(OPENING_INTRO, /https?:|\/|`|\{|\}|<|>/, 'TTS text: no URLs, paths, code or markup');
+});
+test('opening: every other combination renders exactly SILENT_OPENING', () => {
+  for (const vars of [
+    {},
+    { sys__is_new_thread: true },
+    { [NOVA_GREET_VAR]: '', sys__is_new_thread: true },
+    { [NOVA_GREET_VAR]: 'yes', sys__is_new_thread: false },
+    { [NOVA_GREET_VAR]: 'yes' },
+  ]) {
+    const out = renderOpening(OPENING_PHRASE, vars);
+    assert.equal(out, SILENT_OPENING, JSON.stringify(vars));
+    assert.ok(isSilentOpening(out));
+  }
 });
 test('opening: the eval sends the exact kickoff the obeyRules prompt is keyed on', () => {
   assert.equal(EVAL_KICKOFF_TRIGGER, KICKOFF_TRIGGER);
@@ -406,11 +445,10 @@ test('hashDocs: folds CHUNK_FORMAT in, so a chunker change alone invalidates the
   assert.notEqual(hashDocs([{ file: 'index.md', markdown: '# Home' }]), digest);
 });
 
-/* persona identity lint (issue #32) — Nova's real shape: PERSONA_NAME is declared
-   via the `name` prompt, not via a name-bearing opening phrase (hers is the SDK's
-   silent-opening marker). This proves lintPersonaIdentity's declared-name-alone
-   drift check stays clean against what provision() actually sends today. */
-test('persona identity lint: Nova\'s real shape (name-only, no name-bearing openingPhrase) is clean', () => {
+/* persona identity lint (issue #32) — Nova's real shape: PERSONA_NAME is declared via the
+   `name` prompt and the Jinja opening's intro branch says "I'm Nova". The lint reads the whole
+   template, so this proves it stays clean against what provision() actually sends. */
+test('persona identity lint: Nova\'s real shape (name prompt + Jinja opening) is clean', () => {
   const r = lintPersonaIdentity({
     name: PERSONA_NAME,
     openingPhrase: OPENING_PHRASE,
@@ -418,6 +456,7 @@ test('persona identity lint: Nova\'s real shape (name-only, no name-bearing open
     prompts: [{ value: PERSONA_NAME }],
   });
   assert.deepEqual(r.findings, []);
+  assert.equal(r.detectedName, PERSONA_NAME);
 });
 
 /* checkCustomPromptSchema — drift check for Application#getCustomPrompts'

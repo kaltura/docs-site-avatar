@@ -246,7 +246,7 @@ async function loadHistory() {
 }
 
 /* ---------- personas browser ---------- */
-const FLAG_KEYS = ['expectTools', 'forbidTools', 'expectNavPath', 'expectSection', 'relevanceAny', 'expectRestrictedRefusal', 'expectNoPromptLeak', 'expectNoInventedPath', 'expectNoInventedApi', 'isKickoff', 'isResumeKickoff', 'mustHonor', 'skipCompleteness', 'transport'];
+const FLAG_KEYS = ['expectTools', 'forbidTools', 'expectNavPath', 'expectSection', 'relevanceAny', 'expectRestrictedRefusal', 'expectNoPromptLeak', 'expectNoInventedPath', 'expectNoInventedApi', 'isKickoff', 'isResumeKickoff', 'isPillFirst', 'mustHonor', 'skipCompleteness', 'transport'];
 
 function personaGroupHtml(p) {
   return `
