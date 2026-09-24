@@ -69,7 +69,10 @@ const DISPLAY_NAME = 'Nova — SDK Docs Assistant';
 const BASE_URL = 'https://kaltura.github.io/intelligent-agents-sdk';
 // Deliberately chosen persona: a custom-visual "AI trainer" face already in this
 // account, paired with the curated "Yasmin" voice tier ("Friendly, Warm and Clear").
-const DEFAULT_VISUAL_ID = '852e1c51-c48e-4fbb-b800-4222edd8642b';
+// The photo behind this id is a square 2048x2048 crop meeting the renderer's
+// framing spec (see intelligent-agents-sdk/docs/api/design.md § Upload a Custom
+// Visual) — a non-square source pillarboxes with black bars in the circular frame.
+const DEFAULT_VISUAL_ID = 'cca4e555-4a42-48d0-ae53-a10254619aca';
 const DEFAULT_VOICE_ID = '625jGFaa0zTLtQfxwc6Q';
 // Single source of truth for the declared persona name — feeds both the
 // `name` prompt below and lintPersonaIdentity's drift check (see issue #32:
