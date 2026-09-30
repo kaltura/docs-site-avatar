@@ -45,7 +45,7 @@ export const TOOL_SPIRAL_HARD_LIMIT = 6;
 // fetchImpl/pageContext are intentionally unused here (shared signature, see JSDoc).
 export async function streamTurn({ management, configId, message, threadId, capabilities, fetchImpl, pageContext, signal }) {
   async function runOnce(userMessage, tid) {
-    const token = await management.sessions.createConversationToken({ configId });
+    const token = await management.sessions.createConversationToken({ configId, userId: 'nova-eval' });
     const gen = management.conversations.stream({ userMessage, ...(tid ? { threadId: tid } : {}), ...(capabilities ? { capabilities } : {}), signal }, token);
 
     let text = '';

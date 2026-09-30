@@ -35,7 +35,7 @@ import { TOOL_SPIRAL_HARD_LIMIT } from './transport.mjs';
  * @returns {Promise<{text:string, threadId:string|null, toolCalls:object[], rawToolSegCount:number, spiralDetected:boolean, spiralRecovered:boolean, warnings:object[]}>}
  */
 export async function chatTurn({ management, configId, message, threadId, capabilities, pageContext, fetchImpl = fetch, signal }) {
-  const token = await management.sessions.createConversationToken({ configId });
+  const token = await management.sessions.createConversationToken({ configId, userId: 'nova-eval' });
   const session = new KalturaChatSession({
     token: ksString(token),
     ...(threadId ? { threadId } : {}),

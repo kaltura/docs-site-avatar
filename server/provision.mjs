@@ -429,7 +429,8 @@ const KEY_FACTS = `
 - Scripted avatar sessions render speech the caller authors; they don't include turn-taking, interruption handling, model sync, knowledge grounding, tool orchestration, or conversation analytics — the full agentic session does.
 - Thread transcripts: the management SDK DOES provide a direct fetch for a past thread's full transcript — mgmt.threads.transcript() (REST: POST /v1/thread/get_transcripts with the thread id, admin KS). It returns plain text, one turn per line, each line prefixed "human:" or "ai:" — not JSON message objects. Documented on the Conversation & Analytics reference page.
 - mgmt.threads.push({id, content, ...}, ks) DOES EXIST and does not fail for a missing live socket — it injects a message into a thread from your own backend, and a delivered:false in the reply only means no live socket was attached right now; the message still persists on the thread either way.
-- agentIdEquals (on threads.list and feedback.list) only matches threads opened with sessions.createAgentToken({agentId}) — a plain sessions.createConversationToken({configId}) thread's agent_id is "default", so filtering by a real agent id EXCLUDES that thread, it does not match it.
+- agentIdEquals (on threads.list and feedback.list) only matches threads opened with sessions.createAgentToken({agentId}). A plain sessions.createConversationToken({configId}) thread's agent_id is "default", so filtering by a real agent id EXCLUDES that thread, it does not match it. Passing agentId to createConversationToken labels the thread with that agent too.
+- Session types: sessions.createConversationToken and sessions.createAgentToken mint a user session by default (entitlement on, runs as the playback role). Pass userId so each end user gets their own threads. sessionType: 'admin' mints an admin-level session, for a server only. sessions.createAdminToken({ userId }) requires userId; without it the call throws bad_request before any request. Details on the Security page.
 - GenUI ExperienceRenderer: its maxRendered option caps the rendered-widget history at 100 by default; when the cap is exceeded the oldest descriptor is dropped. Documented on the GenUI Reference page.
 - Knowledge: an intellect's knowledge_ids field is capped at ONE record despite its plural array shape — the server rejects more, and the SDK's intellectConfig.setKnowledgeIds() enforces this client-side before any network call. To ground one agent in several content sources, upload them all into that single knowledge record instead of trying to attach several records.
 - Intellect secrets: the management SDK's mgmt.intellects.secrets exposes listNames, has, set, delete, replaceAll, and validate. delete(configId, name, ks, confirm) is permanent and requires confirm = { confirmPermanent: true }.
@@ -500,7 +501,7 @@ async function provision() {
   const sectionsFile = sectionsIdx >= 0 ? process.argv[sectionsIdx + 1] : null;
   const siteDir = resolveSiteDir();
 
-  const admin = await kaltura.sessions.createAdminToken();
+  const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision' });
   console.log('✓ admin token');
 
   // Startup drift check, not gating: confirms the backend's customPrompt
@@ -971,7 +972,7 @@ async function cleanup(opts = {}) {
   try { saved = JSON.parse(await readFile(OUT, 'utf8')); } catch { /* */ }
   const deleted = [];
   const log = (label) => deleted.push(label);
-  const admin = dryRun ? null : await kaltura.sessions.createAdminToken();
+  const admin = dryRun ? null : await kaltura.sessions.createAdminToken({ userId: 'nova-provision' });
   if (dryRun) console.log(`(dry run — no API calls will be made; scope: ${only.join(', ')})`);
 
   // The corpus is only reachable through the intellect, so discover it before that is deleted.
