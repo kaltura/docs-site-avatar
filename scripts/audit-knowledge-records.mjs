@@ -52,7 +52,7 @@ async function main() {
   const saved = JSON.parse(await readFile(join(__dirname, '..', 'server', 'agent.json'), 'utf8').catch(() => '{}'));
 
   const kaltura = new Management({ partnerId, adminSecret });
-  const admin = await kaltura.sessions.createAdminToken();
+  const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-audit' });
   console.log('✓ admin token');
 
   // The live intellect is the only source of truth for which record is in use.
