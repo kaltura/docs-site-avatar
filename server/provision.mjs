@@ -142,14 +142,15 @@ export function stripFrontmatter(text) {
  * subsections' bulk — Nova retrieved a Converse-adjacent chunk and answered
  * from priors. So any `## ` section longer than SUBCHUNK_THRESHOLD that has
  * `### ` subsections is split again at those boundaries, each sub-chunk
- * carrying the same provenance plus its parent section's title.
+ * carrying the same provenance plus its parent section's title. A page with no `## `
+ * headings at all (its body sits under `### `) gets the same split on its intro chunk.
  */
 export const SUBCHUNK_THRESHOLD = 6000;
 
 /** Bumped whenever the chunk text `splitIntoSections` emits changes shape (provenance lines,
  * split rules). It is folded into `hashDocs`, so a chunker change forces the next `--reuse`
  * deploy to re-upload the corpus even when the site's markdown is byte-identical. */
-export const CHUNK_FORMAT = 'chunks-v6:no-page-section-links';
+export const CHUNK_FORMAT = 'chunks-v7:split-intro-subsections';
 
 /** The navigation line every non-first chunk carries (a ### sub-chunk adds a "Part of section"
  * line after it): the complete, copy-as-is JSON argument object for a go_to call that lands on
@@ -280,7 +281,9 @@ export function splitIntoSections(markdown, doc, page = null) {
   const sections = splitAtHeadings(markdown, '## ');
   const chunks = [];
   sections.forEach((section, i) => {
-    if (i === 0 || !title) {
+    // A page whose whole body sits under `### ` headings (no `## `) is one oversized intro chunk.
+    const splitIntro = i === 0 && title && section.length > SUBCHUNK_THRESHOLD && /^### /m.test(section);
+    if ((i === 0 || !title) && !splitIntro) {
       chunks.push(section.trim());
       return;
     }
@@ -303,6 +306,17 @@ export function splitIntoSections(markdown, doc, page = null) {
       return null;
     };
     const provenance = (parentHeading, ...headings) => `# ${title}\n${goToArgsLine(doc.url, keyFor(...headings))}${parentHeading ? `\nPart of section: ${parentHeading}` : ''}`;
+    if (splitIntro) {
+      splitAtHeadings(section, '### ').forEach((sub, j) => {
+        if (j === 0) {
+          chunks.push(sub.trim());
+          return;
+        }
+        const subMatch = sub.match(/^###\s+(.+)$/m);
+        chunks.push(`${provenance('', subMatch ? stripClosingHashes(subMatch[1]) : '')}\n\n${sub}`.trim());
+      });
+      return;
+    }
     if (section.length > SUBCHUNK_THRESHOLD && /^### /m.test(section)) {
       let subs = splitAtHeadings(section, '### ');
       // A preamble that is only the `## ` heading line (no prose before the first `### `)

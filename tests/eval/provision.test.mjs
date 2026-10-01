@@ -263,6 +263,15 @@ test('splitIntoSections: each ### sub-chunk keeps only its own body', () => {
   assert.ok(!chunks[2].includes('sys__ keys'));
   assert.ok(!chunks[3].includes('allow_client_variables'));
 });
+test('splitIntoSections: an oversized intro chunk with ### subsections and no ## splits at ### boundaries', () => {
+  const md = ['# Flat Page', '', `Intro. ${filler(SUBCHUNK_THRESHOLD)}`, '', '### One', '', 'First body.', '', '### Two', '', 'Second body.'].join('\n');
+  const chunks = splitIntoSections(md, { url: '/flat/', file: 'flat.md' });
+  assert.equal(chunks.length, 3);
+  assert.ok(chunks[0].startsWith('# Flat Page') && !chunks[0].includes('### One'));
+  assert.ok(chunks[1].startsWith(`# Flat Page\n${ARGS('/flat/', null)}\n\n### One`));
+  assert.ok(chunks[2].startsWith(`# Flat Page\n${ARGS('/flat/', null)}\n\n### Two`) && !chunks[2].includes('First body'));
+});
+
 test('splitIntoSections: a ## section under the threshold stays whole even with ### subsections', () => {
   const md = '# Page\n\nIntro.\n\n## Small\n\nShort preamble.\n\n### Child\n\nChild body.';
   const chunks = splitIntoSections(md, { url: '/p/' }, pageOf(['small']));
