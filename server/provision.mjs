@@ -20,11 +20,13 @@
  * CURRENT knowledge corpus live (intellect → record → category → entries, see
  * discoverKnowledge) and compares the docs fingerprint stored on that category
  * (`referenceId`, see hashDocs and wireKnowledge) with the docs read from
- * --site-dir. Same hash: the corpus is reused as-is and the teardown/re-upload/
- * indexing-wait is skipped. Different hash: the old corpus is deleted (see
- * deleteKnowledge) before wireKnowledge mints a new one, so repeated redeploys
- * (e.g. from CI) never orphan a corpus. Nothing about the corpus is written to
- * disk; server/agent.json holds only the stable ids.
+ * --site-dir. Same hash: the corpus is reused as-is and the re-upload/indexing-wait is
+ * skipped (--rebuild forces a new corpus anyway). Different hash: wireKnowledge builds a
+ * NEW corpus while the intellect keeps serving the old one, the intellect is repointed to the
+ * new one, and only then is the old one deleted (see deleteKnowledge), so Nova's knowledge base
+ * is never missing and repeated redeploys (e.g. from CI) never orphan a corpus. A failure before
+ * the repoint removes the half-built new corpus and leaves the old one untouched. Nothing about
+ * the corpus is written to disk; server/agent.json holds only the stable ids.
  *
  * Run:  AGENTIC_PARTNER_ID=… AGENTIC_ADMIN_SECRET=… node server/provision.mjs
  *       [--site-dir <path>]                  # read the docs site's src/**\/*.md from
@@ -36,6 +38,8 @@
  *       [--reuse <configId>]                 # update this intellect instead of creating one
  *       [--avatar-id <existingAvatarId>]      # skip preset pick, use this avatar as-is
  *       [--agent-id <existingAgentId>]        # update this agent in place, keep its widgetId
+ *       [--rebuild]                           # with --reuse: build a new corpus even if the docs
+ *                                             # hash is unchanged
  *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag, ...any
  *         hand-recorded extra fields, carried forward as-is }, first backing up any
  *         PREVIOUS agent.json to server/agent.json.bak. A --reuse run with the same
@@ -512,7 +516,14 @@ async function upsertClientTool(admin, toolConfig, existingTools, selfConfigId) 
   return existing.id;
 }
 
-async function provision() {
+/** Runs the deploy. Until the intellect points at a corpus this run built, `ctx.undo` removes that
+ * corpus if anything throws, so a failed run leaves the previous corpus serving and nothing orphaned. */
+function provision() {
+  const ctx = { undo: null };
+  return withRollback(() => provisionSteps(ctx), () => ctx.undo?.());
+}
+
+async function provisionSteps(ctx) {
   const reuseIdx = process.argv.indexOf('--reuse');
   const reuseConfigId = reuseIdx >= 0 ? Number(process.argv[reuseIdx + 1]) : null;
   const avatarIdIdx = process.argv.indexOf('--avatar-id');
@@ -521,6 +532,7 @@ async function provision() {
   const existingAgentId = agentIdIdx >= 0 ? process.argv[agentIdIdx + 1] : null;
   const sectionsIdx = process.argv.indexOf('--sections-file');
   const sectionsFile = sectionsIdx >= 0 ? process.argv[sectionsIdx + 1] : null;
+  const forceRebuild = process.argv.includes('--rebuild');
   const siteDir = resolveSiteDir();
 
   const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision' });
@@ -572,31 +584,44 @@ async function provision() {
   // commit back. The docs are read fresh from --site-dir every run, but a redeploy is often
   // triggered (manually, or by an unrelated provision.mjs change) with no change to the site's
   // own content. When the fingerprint stored on the live category matches, the existing
-  // category/record/entries are already correct and indexed, so the teardown/re-upload/
-  // indexing-wait below is skipped entirely.
+  // category/record/entries are already correct and indexed, so the re-upload/indexing-wait
+  // below is skipped entirely.
   // A discovery failure is deliberately fatal here: it happens before any write, and
   // proceeding blind would upload a second corpus while orphaning the one still linked.
   const live = reuseConfigId ? await discoverKnowledge(admin, reuseConfigId) : null;
-  const knowledgeUnchanged = !!live && live.docsHash === docsHash;
+  const knowledgeUnchanged = !!live && !forceRebuild && live.docsHash === docsHash;
 
   let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, indexed;
+  let newCorpus = null; // set only when this run builds a corpus
   // The indexer works in batch passes: an entry is usually searchable 15 to 30 minutes after it
   // was uploaded, and entries uploaded early finish while later ones are still uploading. So this
-  // wait only covers the tail. With teardown (~5 min) and upload (~20 min) the slow path stays
-  // well inside redeploy.yml's 60 minute job budget.
+  // wait only covers the tail. With upload (~20 min), the wait and the old corpus's teardown
+  // (~5 min) the slow path stays well inside redeploy.yml's 60 minute job budget.
   const INDEX_WAIT_MS = 25 * 60_000;
   if (knowledgeUnchanged) {
     [knowledgeRecordId] = live.recordIds;
     [knowledgeCategoryId] = live.categoryIds;
     knowledgeEntryIds = live.entryIds;
     indexed = true;
-    console.log(`✓ docs unchanged since last deploy (hash ${docsHash.slice(0, 12)}…) — reusing knowledge category ${knowledgeCategoryId}/record ${knowledgeRecordId}, skipping teardown/re-upload/indexing poll`);
+    console.log(`✓ docs unchanged since last deploy (hash ${docsHash.slice(0, 12)}…) — reusing knowledge category ${knowledgeCategoryId}/record ${knowledgeRecordId}, skipping re-upload/indexing poll`);
   } else {
-    if (live) {
-      console.log(`✓ removing previous knowledge corpus before re-upload (record ${live.recordIds.join(',') || 'none'}, category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries)`);
-      await deleteKnowledge(admin, live);
-    }
-    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs, manifest, docsHash));
+    // Build the new corpus next to the live one. The intellect still serves the old corpus until
+    // it is repointed below, and the old one is deleted only after that, so there is no gap.
+    newCorpus = { recordIds: [], categoryIds: [], entryIds: [] };
+    ctx.undo = async () => {
+      // A rejected update does not prove the server ignored it (the response can be lost). Delete
+      // the new corpus only when the intellect is confirmed NOT to link it; if the check itself
+      // fails, keep it, since an orphan is cheaper than deleting a corpus Nova is serving.
+      if (reuseConfigId) {
+        const { knowledgeIds } = await kaltura.knowledge.getLinkage(reuseConfigId, admin);
+        if (newCorpus.recordIds.some((id) => knowledgeIds.map(Number).includes(Number(id)))) {
+          console.error(`✗ intellect ${reuseConfigId} already links the new record, keeping the new corpus`);
+          return;
+        }
+      }
+      await deleteKnowledge(admin, newCorpus);
+    };
+    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs, manifest, docsHash, newCorpus));
 
     // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
     // send it in that single add/update call alongside knowledge_ids — never as a follow-up
@@ -750,6 +775,12 @@ async function provision() {
     configId = intel.id;
     console.log('✓ created intellect', configId);
   }
+  ctx.undo = null; // the intellect serves the new corpus now, so it must never be rolled back
+  // The outgoing corpus is safe to delete.
+  if (live && newCorpus) {
+    console.log(`✓ removing previous knowledge corpus (record ${live.recordIds.join(',') || 'none'}, category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries)`);
+    await deleteKnowledge(admin, live);
+  }
 
   let avatar;
   if (existingAvatarId) {
@@ -823,6 +854,16 @@ async function provision() {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+/** Run `task`. If it throws, run `undo` (best effort, failures logged) and rethrow the original error. */
+export async function withRollback(task, undo, log = console.error) {
+  try {
+    return await task();
+  } catch (e) {
+    await Promise.resolve().then(undo).catch((u) => log('rollback failed:', u.code || u.message));
+    throw e;
+  }
+}
+
 const ENTRY_STATUS_POLL_INTERVAL_MS = 30_000;
 const ENTRY_STATUS_BATCH = 100; // the SDK accepts 1 to 500 ids per call
 const ENTRY_STATUS_MAX_CONSECUTIVE_ERRORS = 5;
@@ -892,9 +933,12 @@ export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budget
  * intellect is ever created/updated.
  * The category's `referenceId` is set to `docsHash` only after the LAST chunk uploaded, so a
  * run that dies mid-upload leaves a category with no hash and the next --reuse run replaces it.
+ * Every id it creates is also pushed into `created` as it goes, so a caller can remove a
+ * half-built corpus when this throws.
  */
-async function wireKnowledge(admin, docs, manifest, docsHash) {
+async function wireKnowledge(admin, docs, manifest, docsHash, created = { recordIds: [], categoryIds: [], entryIds: [] }) {
   const category = await kaltura.knowledge.findOrCreateCategory({ name: `${TAG}-knowledge-${Date.now()}` }, admin);
+  created.categoryIds.push(category.id);
   console.log('✓ knowledge category', category.id);
 
   const record = await kaltura.knowledge.addRecord({
@@ -908,9 +952,10 @@ async function wireKnowledge(admin, docs, manifest, docsHash) {
       }],
     },
   }, admin);
+  created.recordIds.push(record.id);
   console.log('✓ knowledge record', record.id);
 
-  const entryIds = [];
+  const entryIds = created.entryIds;
   for (const doc of docs) {
     const sections = splitIntoSections(doc.markdown, doc, resolvePath(manifest, doc.url));
     const baseName = `${TAG}-${doc.file.replace(/\//g, '-')}`;
@@ -994,17 +1039,15 @@ async function discoverKnowledge(admin, configId) {
 }
 
 /**
- * Delete knowledge records + their categories + every entry in them: the teardown `cleanup()`
- * runs on the intellect's current corpus, factored out so `provision()` can run the same teardown
- * on the outgoing corpus before `wireKnowledge()` mints a new one. Without this, every `--reuse`
- * redeploy would silently orphan the prior category/record/entries.
+ * Delete knowledge records + their categories + every entry in them. Used three ways: `cleanup()`
+ * on the intellect's current corpus, `provision()` on the outgoing corpus once the intellect has
+ * been repointed to the new one, and `provision()` on a half-built new corpus when the build or
+ * the repoint fails. Without the first two, every `--reuse` redeploy would orphan the prior
+ * category/record/entries.
  */
 async function deleteKnowledge(admin, { recordIds = [], categoryIds = [], entryIds = [] } = {}) {
   for (const recordId of recordIds) {
-    // force:true: the outgoing record is still referenced by the intellect being updated at the
-    // exact point this runs (the update call that repoints it to the new record goes out later
-    // in this same run — see provision()), so the SDK's default in-use guard would otherwise
-    // throw knowledge_in_use on every --reuse redeploy.
+    // force:true: this is a deliberate teardown, so skip the SDK's default in-use guard.
     await kaltura.knowledge.deleteRecord(recordId, admin, { confirmPermanent: true, force: true }).catch((e) => console.error('knowledge-record', recordId, e.code));
   }
   if (categoryIds.length) {
@@ -1078,6 +1121,8 @@ const USAGE = `Usage: node server/provision.mjs [options]
   --reuse <configId>                    Update this intellect instead of creating one
   --avatar-id <existingAvatarId>        Skip preset pick, use this avatar as-is
   --agent-id <existingAgentId>          Update this agent in place, keep its widgetId
+  --rebuild                             With --reuse: build a new knowledge corpus even if the
+                                         docs hash is unchanged
   --cleanup                             Delete the agent/avatar/intellect recorded in
                                          server/agent.json plus the knowledge corpus the
                                          intellect links (discovered live, not from the file)
@@ -1087,7 +1132,7 @@ const USAGE = `Usage: node server/provision.mjs [options]
                                          of ${CLEANUP_TARGETS.join(',')}
   --help                                Show this message and exit (no API calls made)`;
 
-const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--cleanup', '--dry-run', '--only', '--help'];
+const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--cleanup', '--dry-run', '--only', '--help'];
 
 function main() {
   const args = stripSiteDirFlag(process.argv.slice(2));

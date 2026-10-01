@@ -12,7 +12,7 @@ const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
   buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, OPENING_INTRO, NOVA_GREET_VAR, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup,
-  checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus,
+  checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 const { SILENT_OPENING, isSilentOpening } = await import('../../vendor/sdk/src/management/index.js');
@@ -620,4 +620,30 @@ test('pollEntryStatus: the budget is the real-world shape, a tail that lands aft
   const r = await h.run(['a']);
   assert.equal(r.indexed, 1);
   assert.equal(h.clock(), 39 * 30_000);
+});
+
+test('withRollback: returns the task result and never runs the undo', async () => {
+  let undone = false;
+  assert.equal(await withRollback(async () => 42, () => { undone = true; }), 42);
+  assert.equal(undone, false);
+});
+
+test('withRollback: a failing task runs the undo once, then rethrows the ORIGINAL error', async () => {
+  const order = [];
+  const boom = new Error('upload failed');
+  await assert.rejects(
+    withRollback(async () => { order.push('task'); throw boom; }, async () => { order.push('undo'); }),
+    (e) => e === boom,
+  );
+  assert.deepEqual(order, ['task', 'undo']);
+});
+
+test('withRollback: a failing undo is logged and never hides the original error', async () => {
+  const logs = [];
+  const boom = new Error('repoint failed');
+  await assert.rejects(
+    withRollback(async () => { throw boom; }, () => { throw Object.assign(new Error('x'), { code: 'server_error' }); }, (...a) => logs.push(a.join(' '))),
+    (e) => e === boom,
+  );
+  assert.deepEqual(logs, ['rollback failed: server_error']);
 });

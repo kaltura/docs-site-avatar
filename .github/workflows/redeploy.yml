@@ -5,7 +5,12 @@ on:
     branches: [main]
     paths:
       - server/provision.mjs
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      rebuild:
+        description: Build a new knowledge corpus even if the docs are unchanged
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,9 +22,9 @@ concurrency:
 jobs:
   redeploy:
     runs-on: ubuntu-26.04
-    # A full corpus replace takes about 5 min to tear down, 20 min to upload ~390 chunks, and up
-    # to 25 min more for the indexing poll (INDEX_WAIT_MS). A same-hash --reuse run finishes in
-    # a few. Budget for the slow path.
+    # A full corpus replace takes about 20 min to upload ~390 chunks, up to 25 min more for the
+    # indexing poll (INDEX_WAIT_MS), then about 5 min to delete the old corpus. A same-hash
+    # --reuse run finishes in a few. Budget for the slow path.
     timeout-minutes: 60
     environment: production
     steps:
@@ -49,12 +54,14 @@ jobs:
         env:
           AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
           AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
+          REBUILD_FLAG: ${{ inputs.rebuild && '--rebuild' || '' }}
         run: |
           node server/provision.mjs \
             --reuse "${{ steps.ids.outputs.config-id }}" \
             --agent-id "${{ steps.ids.outputs.agent-id }}" \
             --avatar-id "${{ steps.ids.outputs.avatar-id }}" \
-            --site-dir ./site
+            --site-dir ./site \
+            ${REBUILD_FLAG}
 
       - name: Confirm server/agent.json is unchanged
         run: |
@@ -78,7 +85,7 @@ jobs:
             echo ""
             echo "provision.mjs discovers the intellect's current knowledge corpus live and compares"
             echo "the docs hash stored on its category with the docs in the site checkout. Same hash:"
-            echo "the corpus is reused. Different hash: it is replaced, indexing is polled via"
+            echo "the corpus is reused. Different hash: a new corpus is built next to the old one, indexing is polled via"
             echo "\`kaltura.knowledge.entryStatus\`, and \`use_knowledge_base:'on'\` is written in the"
-            echo "same intellect update (see docs/ARCHITECTURE.md). Nothing is committed back."
+            echo "same intellect update, then the old corpus is deleted (see docs/ARCHITECTURE.md). Nothing is committed back."
           } >> "$GITHUB_STEP_SUMMARY"
