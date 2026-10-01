@@ -516,7 +516,14 @@ async function upsertClientTool(admin, toolConfig, existingTools, selfConfigId) 
   return existing.id;
 }
 
-async function provision() {
+/** Runs the deploy. Until the intellect points at a corpus this run built, `ctx.undo` removes that
+ * corpus if anything throws, so a failed run leaves the previous corpus serving and nothing orphaned. */
+function provision() {
+  const ctx = { undo: null };
+  return withRollback(() => provisionSteps(ctx), () => ctx.undo?.());
+}
+
+async function provisionSteps(ctx) {
   const reuseIdx = process.argv.indexOf('--reuse');
   const reuseConfigId = reuseIdx >= 0 ? Number(process.argv[reuseIdx + 1]) : null;
   const avatarIdIdx = process.argv.indexOf('--avatar-id');
@@ -585,7 +592,7 @@ async function provision() {
   const knowledgeUnchanged = !!live && !forceRebuild && live.docsHash === docsHash;
 
   let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, indexed;
-  let newCorpus = null; // set only when this run builds a corpus; removed again if the repoint fails
+  let newCorpus = null; // set only when this run builds a corpus
   // The indexer works in batch passes: an entry is usually searchable 15 to 30 minutes after it
   // was uploaded, and entries uploaded early finish while later ones are still uploading. So this
   // wait only covers the tail. With upload (~20 min), the wait and the old corpus's teardown
@@ -601,10 +608,20 @@ async function provision() {
     // Build the new corpus next to the live one. The intellect still serves the old corpus until
     // it is repointed below, and the old one is deleted only after that, so there is no gap.
     newCorpus = { recordIds: [], categoryIds: [], entryIds: [] };
-    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await withRollback(
-      () => wireKnowledge(admin, docs, manifest, docsHash, newCorpus),
-      () => deleteKnowledge(admin, newCorpus),
-    ));
+    ctx.undo = async () => {
+      // A rejected update does not prove the server ignored it (the response can be lost). Delete
+      // the new corpus only when the intellect is confirmed NOT to link it; if the check itself
+      // fails, keep it, since an orphan is cheaper than deleting a corpus Nova is serving.
+      if (reuseConfigId) {
+        const { knowledgeIds } = await kaltura.knowledge.getLinkage(reuseConfigId, admin);
+        if (newCorpus.recordIds.some((id) => knowledgeIds.map(Number).includes(Number(id)))) {
+          console.error(`✗ intellect ${reuseConfigId} already links the new record, keeping the new corpus`);
+          return;
+        }
+      }
+      await deleteKnowledge(admin, newCorpus);
+    };
+    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs, manifest, docsHash, newCorpus));
 
     // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
     // send it in that single add/update call alongside knowledge_ids — never as a follow-up
@@ -749,17 +766,17 @@ async function provision() {
   }
 
   let configId;
-  const discardNewCorpus = () => (newCorpus ? deleteKnowledge(admin, newCorpus) : undefined);
   if (reuseConfigId) {
-    await withRollback(() => kaltura.intellects.update({ id: reuseConfigId, ...intellectBody }, admin), discardNewCorpus);
+    await kaltura.intellects.update({ id: reuseConfigId, ...intellectBody }, admin);
     configId = reuseConfigId;
     console.log('✓ updated existing intellect', configId);
   } else {
-    const intel = await withRollback(() => kaltura.intellects.add(intellectBody, admin), discardNewCorpus);
+    const intel = await kaltura.intellects.add(intellectBody, admin);
     configId = intel.id;
     console.log('✓ created intellect', configId);
   }
-  // The intellect now serves the new corpus, so the outgoing one is safe to delete.
+  ctx.undo = null; // the intellect serves the new corpus now, so it must never be rolled back
+  // The outgoing corpus is safe to delete.
   if (live && newCorpus) {
     console.log(`✓ removing previous knowledge corpus (record ${live.recordIds.join(',') || 'none'}, category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries)`);
     await deleteKnowledge(admin, live);
