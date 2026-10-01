@@ -12,7 +12,7 @@ const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
   buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, OPENING_INTRO, NOVA_GREET_VAR, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup,
-  checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState,
+  checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 const { SILENT_OPENING, isSilentOpening } = await import('../../vendor/sdk/src/management/index.js');
@@ -529,4 +529,82 @@ test('knowledgeState: more than one record or category collects every id but tru
 test('knowledgeState: a record whose category is gone yields the record id only', () => {
   const s = knowledgeState([{ id: 1, categoryIds: [10] }], []);
   assert.deepEqual(s, { recordIds: [1], categoryIds: [], entryIds: [], docsHash: null });
+});
+
+/* indexing poll: entryStatus rows are tallied per entry, never per call, and time is a fake clock. */
+const row = (id, ...statuses) => ({ entry_id: id, documents: statuses.map((status) => ({ objectType: 'KalturaMarkdownAsset', objectId: `d-${id}`, status })) });
+function pollHarness(statusFor, { budgetMs = 10 * 60_000, intervalMs = 30_000 } = {}) {
+  let t = 0;
+  const calls = [];
+  const logs = [];
+  const run = (ids) => pollEntryStatus('ks', 1, ids, budgetMs, {
+    fetchStatus: async (batch) => { calls.push({ at: t, ids: batch }); return statusFor(batch, calls.length); },
+    wait: async (ms) => { t += ms; }, now: () => t, intervalMs, log: (m) => logs.push(m),
+  });
+  return { run, calls, logs, clock: () => t };
+}
+
+test('entryIndexState: only a non-empty documents list with a final status counts as finished', () => {
+  assert.equal(entryIndexState(undefined), 'pending');
+  assert.equal(entryIndexState({ entry_id: 'a' }), 'pending');
+  assert.equal(entryIndexState({ entry_id: 'a', documents: [] }), 'pending', '[].every() is true, so an empty list must not pass as indexed');
+  assert.equal(entryIndexState(row('a', null)), 'pending');
+  assert.equal(entryIndexState(row('a', 'SUCCEEDED', null)), 'pending');
+  assert.equal(entryIndexState(row('a', 'SUCCEEDED')), 'ok');
+  assert.equal(entryIndexState(row('a', 'TOO_SHORT')), 'ok');
+  assert.equal(entryIndexState(row('a', 'NO_CHAPTERS')), 'failed');
+  assert.equal(entryIndexState(row('a', 'SUCCEEDED', 'PARSE_ERROR')), 'failed');
+  assert.equal(entryIndexState(row('a', 'SOMETHING_NEW')), 'failed', 'an unknown final status is surfaced, not trusted');
+});
+
+test('pollEntryStatus: finishes as soon as every entry is indexed and never re-queries finished ids', async () => {
+  const seen = new Set();
+  const h = pollHarness((ids, n) => ({ entries: ids.filter((id) => id === 'a' || n >= 2).map((id) => { seen.add(id); return row(id, 'SUCCEEDED'); }) }));
+  const r = await h.run(['a', 'b']);
+  assert.deepEqual(r, { indexed: 2, failed: [], pending: [] });
+  assert.deepEqual(h.calls.map((c) => c.ids), [['a', 'b'], ['b']]);
+  assert.equal(h.clock(), 30_000, 'one 30 s wait between the two polls');
+  assert.ok(h.logs.includes('✓ all entries confirmed indexed'));
+});
+
+test('pollEntryStatus: splits large corpora into batches the SDK accepts (max 500, we use 100)', async () => {
+  const ids = Array.from({ length: 390 }, (_, i) => `e${i}`);
+  const h = pollHarness((batch) => ({ entries: batch.map((id) => row(id, 'SUCCEEDED')) }));
+  const r = await h.run(ids);
+  assert.equal(r.indexed, 390);
+  assert.deepEqual(h.calls.map((c) => c.ids.length), [100, 100, 100, 90]);
+});
+
+test('pollEntryStatus: an empty documents list is not "indexed", so the poll keeps waiting and then gives up at the budget', async () => {
+  const h = pollHarness((ids) => ({ entries: ids.map((id) => ({ entry_id: id, documents: [] })) }), { budgetMs: 90_000 });
+  const r = await h.run(['a']);
+  assert.deepEqual(r, { indexed: 0, failed: [], pending: ['a'] });
+  assert.equal(h.clock(), 90_000, 'waits out the whole budget, never longer');
+  assert.ok(h.logs.some((m) => m.startsWith('⚠ 1/1 entries not confirmed indexed')));
+});
+
+test('pollEntryStatus: entries that finish with an error status are named, counted as finished, and stop the wait', async () => {
+  const h = pollHarness((ids) => ({ entries: ids.map((id) => row(id, id === 'bad' ? 'NO_CHAPTERS' : 'SUCCEEDED')) }));
+  const r = await h.run(['ok', 'bad']);
+  assert.deepEqual(r, { indexed: 1, failed: ['bad'], pending: [] });
+  assert.equal(h.calls.length, 1);
+  assert.ok(h.logs.some((m) => m.includes('bad NO_CHAPTERS')));
+  assert.ok(!h.logs.includes('✓ all entries confirmed indexed'), 'a failed entry must not read as a clean pass');
+});
+
+test('pollEntryStatus: a flaky status call is retried, and five in a row stop the wait without throwing', async () => {
+  let n = 0;
+  const flaky = pollHarness((ids) => { if (++n === 1) throw Object.assign(new Error('boom'), { code: 'http_503' }); return { entries: ids.map((id) => row(id, 'SUCCEEDED')) }; });
+  assert.equal((await flaky.run(['a'])).indexed, 1);
+  const dead = pollHarness(() => { throw new Error('down'); });
+  const r = await dead.run(['a']);
+  assert.deepEqual(r.pending, ['a']);
+  assert.equal(dead.calls.length, 5);
+});
+
+test('pollEntryStatus: the budget is the real-world shape, a tail that lands after many polls is still caught', async () => {
+  const h = pollHarness((ids, n) => ({ entries: n >= 40 ? ids.map((id) => row(id, 'SUCCEEDED')) : [] }), { budgetMs: 25 * 60_000 });
+  const r = await h.run(['a']);
+  assert.equal(r.indexed, 1);
+  assert.equal(h.clock(), 39 * 30_000);
 });

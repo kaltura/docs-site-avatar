@@ -17,8 +17,9 @@ concurrency:
 jobs:
   redeploy:
     runs-on: ubuntu-26.04
-    # A full corpus replace (teardown, ~350 chunk uploads, indexing poll) takes well over 15
-    # minutes. A same-hash --reuse run finishes in a few. Budget for the slow path.
+    # A full corpus replace takes about 5 min to tear down, 20 min to upload ~390 chunks, and up
+    # to 25 min more for the indexing poll (INDEX_WAIT_MS). A same-hash --reuse run finishes in
+    # a few. Budget for the slow path.
     timeout-minutes: 60
     environment: production
     steps:
