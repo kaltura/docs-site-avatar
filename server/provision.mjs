@@ -127,21 +127,18 @@ export function stripFrontmatter(text) {
  * non-first chunk re-prefixed with the doc's own `# ` title so it still
  * carries page-level context in isolation. Path A (`knowledge.uploadMarkdown`, what wireKnowledge
  * uses) has no `chunkSize` knob — that lives only on the gated Path B
- * (`knowledge.linkCategory`, 403s on this partner tier) — and its indexer
- * embeds a whole uploaded document as ONE vector (`EmbedDocumentV1`), so a
- * multi-KB reference page drowns a small detail (e.g. a two-line example
- * buried under one of a dozen `##` sections) in the rest of the page's
- * unrelated content. Splitting at the same `## ` boundaries the site already
- * renders as sections is the only lever Path A leaves for keeping each
- * embedding scoped enough for RAG to actually hit that detail.
+ * (`knowledge.linkCategory`, 403s on this partner tier) — so the only lever Path A leaves is
+ * what we upload: one entry per chunk.
  *
- * The same drowning failure recurs one level down (issue #42): a single `## `
- * section can itself run to many KB (api-reference's "Agent Components" is
- * ~19KB across nine `### ` subsections), and one embedding for all of it lost
- * the Converse gate row (`allow_client_variables`) to the surrounding
- * subsections' bulk — Nova retrieved a Converse-adjacent chunk and answered
- * from priors. So any `## ` section longer than SUBCHUNK_THRESHOLD that has
- * `### ` subsections is split again at those boundaries, each sub-chunk
+ * Why per section and not per page: every chunk carries its own provenance (page title, a finished
+ * go_to argument object, the parent section), and `async_search_knowledge_base` returns the hit as
+ * plain prose with no structured (page, section) pointer. The provenance lines are what let a hit
+ * chain straight into a go_to call. The boundaries are the ones the site already renders as sections.
+ *
+ * Issue #42: a single `## ` section can itself run to many KB (api-reference's "Agent Components"
+ * is ~19KB across nine `### ` subsections), and Nova retrieved a Converse-adjacent chunk without the
+ * gate row (`allow_client_variables`) and answered from priors. So any `## ` section longer than
+ * SUBCHUNK_THRESHOLD that has `### ` subsections is split again at those boundaries, each sub-chunk
  * carrying the same provenance plus its parent section's title. A page with no `## `
  * headings at all (its body sits under `### `) gets the same split on its intro chunk.
  */
