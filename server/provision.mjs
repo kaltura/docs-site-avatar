@@ -580,7 +580,11 @@ async function provision() {
   const knowledgeUnchanged = !!live && live.docsHash === docsHash;
 
   let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, indexed;
-  const INDEX_WAIT_MS = 80000; // matches the "45-90s+" async_search_knowledge_base estimate below
+  // The indexer works in batch passes: an entry is usually searchable 15 to 30 minutes after it
+  // was uploaded, and entries uploaded early finish while later ones are still uploading. So this
+  // wait only covers the tail. With teardown (~5 min) and upload (~20 min) the slow path stays
+  // well inside redeploy.yml's 60 minute job budget.
+  const INDEX_WAIT_MS = 25 * 60_000;
   if (knowledgeUnchanged) {
     [knowledgeRecordId] = live.recordIds;
     [knowledgeCategoryId] = live.categoryIds;
@@ -610,10 +614,11 @@ async function provision() {
     // of the entries just uploaded have actually finished indexing, so polling it here never
     // tells us anything more on a later attempt than it did on the first. The real per-entry
     // signal, kaltura.knowledge.entryStatus(), is the correct, officially supported completion
-    // check. It returns an empty `entries` array until an entry
-    // finishes indexing, then a per-document `status` (observed: 'SUCCEEDED').
-    console.log(`… polling knowledge record ${knowledgeRecordId} for indexing completion (up to ${INDEX_WAIT_MS / 1000}s)`);
-    indexed = await pollEntryStatus(admin, knowledgeRecordId, knowledgeEntryIds, INDEX_WAIT_MS);
+    // check. It omits an entry until the indexer picks it up, then reports a per-document
+    // `status`: null while queued, a final value once finished (see entryIndexState).
+    console.log(`… polling knowledge record ${knowledgeRecordId} for indexing completion (up to ${INDEX_WAIT_MS / 60_000} min)`);
+    await pollEntryStatus(admin, knowledgeRecordId, knowledgeEntryIds, INDEX_WAIT_MS);
+    indexed = true; // a slow or failed index never turns RAG off, see pollEntryStatus
   }
 
   const existingTools = await kaltura.tools.list(admin).all();
@@ -813,32 +818,65 @@ async function provision() {
   console.log(`knowledge: category ${knowledgeCategoryId}, record ${knowledgeRecordId}, ${knowledgeEntryIds.length} entries, docs hash ${docsHash}`);
   console.log(knowledgeUnchanged
     ? `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, reused as-is (docs unchanged, no re-upload/wait needed).`
-    : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after polling kaltura.knowledge.entryStatus() for indexing completion (budget ${INDEX_WAIT_MS / 1000}s).`);
+    : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after polling kaltura.knowledge.entryStatus() for indexing completion (budget ${INDEX_WAIT_MS / 60_000} min).`);
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-const ENTRY_STATUS_POLL_INTERVAL_MS = 5000;
+const ENTRY_STATUS_POLL_INTERVAL_MS = 30_000;
+const ENTRY_STATUS_BATCH = 100; // the SDK accepts 1 to 500 ids per call
+const ENTRY_STATUS_MAX_CONSECUTIVE_ERRORS = 5;
+const INDEX_OK_STATUSES = new Set(['SUCCEEDED', 'TOO_SHORT']);
 
-/** Poll kaltura.knowledge.entryStatus() until every entry reports a per-document status, or
- * budgetMs runs out. Always resolves `true` (use_knowledge_base stays 'on' either way) — a slow
- * indexer shouldn't disable RAG outright, it should just get logged as a heads-up. */
-async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budgetMs) {
-  const deadline = Date.now() + budgetMs;
+/** Where one `entryStatus` row stands: 'ok', 'failed' (finished with NO_CHAPTERS, PARSE_ERROR or
+ * any other non-success status) or 'pending'. A missing row, an empty `documents` list and a null
+ * status all mean the indexer has not finished. The length check matters: `[].every()` is true. */
+export function entryIndexState(row) {
+  const docs = row?.documents;
+  if (!docs?.length || docs.some((d) => !d.status)) return 'pending';
+  return docs.every((d) => INDEX_OK_STATUSES.has(d.status)) ? 'ok' : 'failed';
+}
+
+/** Poll kaltura.knowledge.entryStatus() until every entry has finished indexing, or budgetMs runs
+ * out. Never gates the deploy: use_knowledge_base stays 'on' either way. A slow indexer and a
+ * flaky status call are logged as a heads-up, and entries that finished with an error status are
+ * named so a bad chunk does not pass as indexed. Returns the final tally.
+ * `fetchStatus`, `wait`, `now` and `log` are injectable for tests. */
+export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budgetMs, {
+  fetchStatus = (ids) => kaltura.knowledge.entryStatus(knowledgeRecordId, ids, admin),
+  wait = sleep, now = Date.now, intervalMs = ENTRY_STATUS_POLL_INTERVAL_MS, log = console.log,
+} = {}) {
+  const startedAt = now();
+  const deadline = startedAt + budgetMs;
   const pending = new Set(entryIds);
-  while (pending.size && Date.now() < deadline) {
-    const { entries } = await kaltura.knowledge.entryStatus(knowledgeRecordId, [...pending], admin);
-    for (const entry of entries) {
-      if (entry.documents?.every((d) => d.status)) pending.delete(entry.entry_id);
+  const failed = new Map();
+  let errors = 0;
+  while (pending.size) {
+    const ids = [...pending];
+    try {
+      for (let i = 0; i < ids.length && (i === 0 || now() < deadline); i += ENTRY_STATUS_BATCH) {
+        const { entries = [] } = await fetchStatus(ids.slice(i, i + ENTRY_STATUS_BATCH));
+        for (const row of entries) {
+          const state = entryIndexState(row);
+          if (state === 'pending' || !pending.delete(row.entry_id)) continue;
+          if (state === 'failed') failed.set(row.entry_id, row.documents.map((d) => d.status).join(','));
+        }
+      }
+      errors = 0;
+    } catch (e) {
+      // The corpus is already uploaded, so a flaky status call should not fail the deploy.
+      log(`  … entry status call failed (${e.code || e.message})`);
+      if (++errors >= ENTRY_STATUS_MAX_CONSECUTIVE_ERRORS) break;
     }
-    if (pending.size) {
-      console.log(`  … ${pending.size}/${entryIds.length} entries still indexing`);
-      await sleep(Math.min(ENTRY_STATUS_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())));
-    }
+    // Stop when the next poll would start after the deadline, so no request goes out past the budget.
+    if (!pending.size || now() + intervalMs >= deadline) break;
+    log(`  … ${entryIds.length - pending.size}/${entryIds.length} entries indexed (${Math.round((now() - startedAt) / 60_000)} min)`);
+    await wait(intervalMs);
   }
-  if (pending.size) console.log(`⚠ ${pending.size}/${entryIds.length} entries not confirmed indexed after ${budgetMs / 1000}s — enabling RAG anyway`);
-  else console.log('✓ all entries confirmed indexed');
-  return true;
+  if (failed.size) log(`⚠ ${failed.size} entries finished indexing with an error status: ${[...failed].map(([id, st]) => `${id} ${st}`).join(', ')}`);
+  if (pending.size) log(`⚠ ${pending.size}/${entryIds.length} entries not confirmed indexed after ${Math.round((now() - startedAt) / 60_000)} min — enabling RAG anyway, they become searchable as the indexer reaches them`);
+  else if (!failed.size) log('✓ all entries confirmed indexed');
+  return { indexed: entryIds.length - pending.size - failed.size, failed: [...failed.keys()], pending: [...pending] };
 }
 
 /**
