@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   redeploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # A full corpus replace (teardown, ~350 chunk uploads, indexing poll) takes well over 15
     # minutes. A same-hash --reuse run finishes in a few. Budget for the slow path.
     timeout-minutes: 60
