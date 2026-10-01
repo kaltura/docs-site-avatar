@@ -307,7 +307,10 @@ export function splitIntoSections(markdown, doc, page = null) {
     };
     const provenance = (parentHeading, ...headings) => `# ${title}\n${goToArgsLine(doc.url, keyFor(...headings))}${parentHeading ? `\nPart of section: ${parentHeading}` : ''}`;
     if (splitIntro) {
-      splitAtHeadings(section, '### ').forEach((sub, j) => {
+      let subs = splitAtHeadings(section, '### ');
+      // Same fold as the `## ` path below: a title-only preamble has nothing retrievable.
+      if (subs.length > 1 && /^#[^\n]*$/.test(subs[0].trim())) subs = [`${subs[0].trim()}\n\n${subs[1]}`, ...subs.slice(2)];
+      subs.forEach((sub, j) => {
         if (j === 0) {
           chunks.push(sub.trim());
           return;

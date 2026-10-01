@@ -272,6 +272,14 @@ test('splitIntoSections: an oversized intro chunk with ### subsections and no ##
   assert.ok(chunks[2].startsWith(`# Flat Page\n${ARGS('/flat/', null)}\n\n### Two`) && !chunks[2].includes('First body'));
 });
 
+test('splitIntoSections: a title-only intro folds into the first ### sub-chunk', () => {
+  const md = ['# Flat Page', '', '### One', '', `First body. ${filler(SUBCHUNK_THRESHOLD)}`, '', '### Two', '', 'Second body.'].join('\n');
+  const chunks = splitIntoSections(md, { url: '/flat/', file: 'flat.md' });
+  assert.equal(chunks.length, 2);
+  assert.ok(chunks[0].startsWith('# Flat Page\n\n### One'));
+  assert.ok(chunks[1].includes('### Two'));
+});
+
 test('splitIntoSections: a ## section under the threshold stays whole even with ### subsections', () => {
   const md = '# Page\n\nIntro.\n\n## Small\n\nShort preamble.\n\n### Child\n\nChild body.';
   const chunks = splitIntoSections(md, { url: '/p/' }, pageOf(['small']));
