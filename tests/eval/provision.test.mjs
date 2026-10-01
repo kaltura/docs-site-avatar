@@ -579,8 +579,21 @@ test('pollEntryStatus: an empty documents list is not "indexed", so the poll kee
   const h = pollHarness((ids) => ({ entries: ids.map((id) => ({ entry_id: id, documents: [] })) }), { budgetMs: 90_000 });
   const r = await h.run(['a']);
   assert.deepEqual(r, { indexed: 0, failed: [], pending: ['a'] });
-  assert.equal(h.clock(), 90_000, 'waits out the whole budget, never longer');
+  assert.equal(h.clock(), 60_000, 'the next poll would start at the deadline, so it never goes out');
+  assert.deepEqual(h.calls.map((c) => c.at), [0, 30_000, 60_000]);
   assert.ok(h.logs.some((m) => m.startsWith('⚠ 1/1 entries not confirmed indexed')));
+});
+
+test('pollEntryStatus: a slow batch cannot push later batches past the deadline', async () => {
+  const ids = Array.from({ length: 250 }, (_, i) => `e${i}`);
+  let t = 0;
+  const calls = [];
+  const r = await pollEntryStatus('ks', 1, ids, 60_000, {
+    fetchStatus: async (batch) => { calls.push(batch.length); t += 40_000; return { entries: [] }; },
+    wait: async (ms) => { t += ms; }, now: () => t, intervalMs: 30_000, log: () => {},
+  });
+  assert.deepEqual(calls, [100, 100], 'the third batch would start at 80 s, past the 60 s budget');
+  assert.equal(r.pending.length, 250);
 });
 
 test('pollEntryStatus: entries that finish with an error status are named, counted as finished, and stop the wait', async () => {

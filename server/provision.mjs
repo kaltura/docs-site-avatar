@@ -854,7 +854,7 @@ export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budget
   while (pending.size) {
     const ids = [...pending];
     try {
-      for (let i = 0; i < ids.length; i += ENTRY_STATUS_BATCH) {
+      for (let i = 0; i < ids.length && (i === 0 || now() < deadline); i += ENTRY_STATUS_BATCH) {
         const { entries = [] } = await fetchStatus(ids.slice(i, i + ENTRY_STATUS_BATCH));
         for (const row of entries) {
           const state = entryIndexState(row);
@@ -868,9 +868,10 @@ export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budget
       log(`  … entry status call failed (${e.code || e.message})`);
       if (++errors >= ENTRY_STATUS_MAX_CONSECUTIVE_ERRORS) break;
     }
-    if (!pending.size || now() >= deadline) break;
+    // Stop when the next poll would start after the deadline, so no request goes out past the budget.
+    if (!pending.size || now() + intervalMs >= deadline) break;
     log(`  … ${entryIds.length - pending.size}/${entryIds.length} entries indexed (${Math.round((now() - startedAt) / 60_000)} min)`);
-    await wait(Math.min(intervalMs, Math.max(0, deadline - now())));
+    await wait(intervalMs);
   }
   if (failed.size) log(`⚠ ${failed.size} entries finished indexing with an error status: ${[...failed].map(([id, st]) => `${id} ${st}`).join(', ')}`);
   if (pending.size) log(`⚠ ${pending.size}/${entryIds.length} entries not confirmed indexed after ${Math.round((now() - startedAt) / 60_000)} min — enabling RAG anyway, they become searchable as the indexer reaches them`);
