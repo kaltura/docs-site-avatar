@@ -17,7 +17,7 @@ concurrency:
 jobs:
   eval:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     environment: production
     permissions:
