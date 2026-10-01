@@ -149,7 +149,7 @@ export const SUBCHUNK_THRESHOLD = 6000;
 /** Bumped whenever the chunk text `splitIntoSections` emits changes shape (provenance lines,
  * split rules). It is folded into `hashDocs`, so a chunker change forces the next `--reuse`
  * deploy to re-upload the corpus even when the site's markdown is byte-identical. */
-export const CHUNK_FORMAT = 'chunks-v5:no-anchor-links';
+export const CHUNK_FORMAT = 'chunks-v6:no-page-section-links';
 
 /** The navigation line every non-first chunk carries (a ### sub-chunk adds a "Part of section"
  * line after it): the complete, copy-as-is JSON argument object for a go_to call that lands on
@@ -174,6 +174,13 @@ const TARGET_CLOSE_RE = /^<\/div>\s*$/;
  * key `what-it-is`), and a page's "On this page" list puts a dozen of them in the retrieved
  * text; live, the brain fused two keys with an id's `--` into one section that resolves nowhere. */
 const ANCHOR_LINK_RE = /\[([^\]]*)\]\(#[^)]*\)/g;
+/** `[label](/other/page/#id)`: a link to a section of another site page. Its path and heading id are
+ * the one place a chunk shows a page path that is not its own, next to its own finished go_to line. Live, the
+ * brain took the other page's path from the link and the section key from its own line (or from
+ * the fragment, cut short), and go_to landed on a page that has no such section (4/4 turns on
+ * "two main entry points"). The label is enough: every page is already in the SITE MAP. A link to a page with no
+ * fragment stays as it is. */
+const PAGE_LINK_RE = /\[([^\]]*)\]\(\/(?!\/)[^)#]*#[^)]*\)/g;
 
 /**
  * Replace the site's `<div data-nova-target="key" data-nova-label="Label">` wrappers with a
@@ -186,7 +193,8 @@ const ANCHOR_LINK_RE = /\[([^\]]*)\]\(#[^)]*\)/g;
  * keeps only its label as plain text; a wrapper inside a fenced code block is documentation of
  * the markup and is left alone. In-page anchor links (`[label](#id)`) outside fences are reduced to
  * their label for the same reason: the fragment is a heading id, the one string on the page that
- * looks like a section key without being one.
+ * looks like a section key without being one. Links to a section of another page are reduced to their
+ * label too (see PAGE_LINK_RE).
  */
 export function rewriteTargetMarkup(markdown, path, page = null) {
   const out = [];
@@ -212,7 +220,7 @@ export function rewriteTargetMarkup(markdown, path, page = null) {
       continue;
     }
     if (open && TARGET_CLOSE_RE.test(line)) { open = false; continue; }
-    out.push(line.replace(ANCHOR_LINK_RE, '$1'));
+    out.push(line.replace(ANCHOR_LINK_RE, '$1').replace(PAGE_LINK_RE, '$1'));
   }
   return out.join('\n');
 }

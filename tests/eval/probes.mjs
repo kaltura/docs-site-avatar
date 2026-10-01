@@ -152,15 +152,19 @@ export function probeCompleteness(expectation, text) {
  * A factual answer check. `relevanceAny`: at least one keyword must appear. `relevanceAll`
  * (optional): every regex source in it must also match, for facts whose correct answer is a set
  * (e.g. all three form stages) that one stray keyword in a wrong answer could otherwise satisfy.
+ * `relevanceNone` (optional): no regex source in it may match; it names the known wrong claim
+ * (a negated requirement, an invented stage) that a keyword hit could not rule out.
  */
 export function probeRelevance(expectation, text) {
   const any = expectation.relevanceAny || [];
   const all = expectation.relevanceAll || [];
+  const none = expectation.relevanceNone || [];
   if (any.length === 0 && all.length === 0) return null;
   const lower = (text || '').toLowerCase();
   const anyHit = any.length === 0 || any.some((kw) => lower.includes(kw.toLowerCase()));
   const missing = all.filter((src) => !new RegExp(src, 'i').test(text || ''));
-  return { pass: anyHit && missing.length === 0, keywords: any, missing };
+  const forbidden = none.filter((src) => new RegExp(src, 'i').test(text || ''));
+  return { pass: anyHit && missing.length === 0 && forbidden.length === 0, keywords: any, missing, forbidden };
 }
 
 // go_to is a one-call tool per the SDK's SITE_NAV_RULES_PROMPT ("at most once per reply"), and

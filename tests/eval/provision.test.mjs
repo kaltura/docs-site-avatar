@@ -166,6 +166,11 @@ test('rewriteTargetMarkup: an in-page anchor link keeps its label and loses the 
   assert.ok(out.includes('[the SDK repo](https://github.com/kaltura/intelligent-agents-sdk)'));
   assert.ok(out.includes('[Getting Started](/getting-started/)'));
 });
+test('rewriteTargetMarkup: a link to a section of another page keeps its label and loses path and fragment', () => {
+  const md = 'For the full map, see **[System Internals Reference\'s "SDK Module Map & Data Flow"](/reference/architecture-reference/module-map-and-data-flow/#sdk-module-map--data-flow)**, or [Getting Started](/getting-started/).';
+  const out = rewriteTargetMarkup(md, '/explanation/architecture/', pageOf(['sdk-module-map']));
+  assert.equal(out, 'For the full map, see **System Internals Reference\'s "SDK Module Map & Data Flow"**, or [Getting Started](/getting-started/).');
+});
 test('rewriteTargetMarkup: an anchor link inside a fenced code block is left alone', () => {
   const md = '# Guide\n\n```md\n[Top](#top)\n```\n';
   assert.equal(rewriteTargetMarkup(md, '/guides/nav/', pageOf(['x'])), md);

@@ -82,7 +82,8 @@ if (trials > 1) log(`▶ running ${trials} trials per persona for pass^k reliabi
  * because the index warms document by document. So before scoring anything, ask one
  * section-granularity question per docs area (facts only the knowledge base, not keyFacts or
  * the site map, can answer) and hold the run until the brain answers ALL of them correctly in
- * the same attempt. Proceeds with a loud warning if the window is exhausted; the relevance
+ * the same attempt (the four are asked concurrently, so the worst case stays near 30 minutes, inside
+ * the CI job's 45). Proceeds with a loud warning if the window is exhausted; the relevance
  * failures that follow are release-blocking, so the run fails honestly.
  */
 const WARMUP_CANARIES = [
@@ -111,8 +112,8 @@ async function askCanary(canary, attempt) {
 
 async function warmUpKnowledgeRetrieval() {
   for (let attempt = 1; attempt <= WARMUP_ATTEMPTS; attempt++) {
-    const cold = [];
-    for (const canary of WARMUP_CANARIES) if (!(await askCanary(canary, attempt))) cold.push(canary.name);
+    const answered = await Promise.all(WARMUP_CANARIES.map((canary) => askCanary(canary, attempt)));
+    const cold = WARMUP_CANARIES.filter((_, i) => !answered[i]).map((c) => c.name);
     if (cold.length === 0) {
       log(`✓ knowledge retrieval warm (${WARMUP_CANARIES.length} canaries answered on attempt ${attempt})`);
       return;
