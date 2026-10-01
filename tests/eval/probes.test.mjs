@@ -103,6 +103,22 @@ test('relevance: no keyword hit fails', () => {
   assert.equal(r.pass, false);
 });
 
+test('relevance: relevanceAll needs every pattern, even when a keyword hits', () => {
+  const exp = { relevanceAny: ['throws'], relevanceAll: ['\\bstart\\b', '\\bmiddle\\b', '\\bend\\b'] };
+  assert.equal(probeRelevance(exp, 'Stages are start, middle and end. It throws.').pass, true);
+  const wrong = probeRelevance(exp, 'Target onboarding or lead capture at the start. It throws.');
+  assert.equal(wrong.pass, false);
+  assert.deepEqual(wrong.missing, ['\\bmiddle\\b', '\\bend\\b']);
+});
+test('relevance: relevanceAll alone is enough to activate the probe', () => {
+  assert.equal(probeRelevance({ relevanceAll: ['mit'] }, 'MIT').pass, true);
+});
+test('relevance: a miss is release-blocking', () => {
+  const s = scoreTurn({ expectation: { relevanceAny: ['mit'], skipCompleteness: true }, latencyMs: 1500, text: 'It is free to use, quite permissive and open.', toolCalls: [] }, {});
+  assert.deepEqual(s.releaseBlockingFails, ['relevance']);
+  assert.equal(s.healthy, false);
+});
+
 /* single tool call per turn */
 test('singleToolCallPerTurn: one call of a strict tool plus another tool passes', () => {
   const r = probeSingleToolCallPerTurn([{ name: 'go_to' }, { name: 'get_experience_instructions' }]);
@@ -648,4 +664,35 @@ test('unionScored: failures across different trials are unioned, not just the fi
   assert.ok(s.releaseBlockingFails.includes('noInventedUrl'));
   assert.ok(s.releaseBlockingFails.includes('noPromptLeak'));
   assert.equal(s.releaseBlockingFails.length, 2);
+});
+
+/* accuracy probes in personas.mjs: known-good and known-wrong replies */
+import { buildPersonas } from './personas.mjs';
+const knowledgeTurn = (fragment) => {
+  const siteData = { routes: [], manifest: { pages: [{ path: '/page-0/', title: 'Page 0', sections: [] }] } };
+  for (const p of buildPersonas(siteData)) for (const t of p.turns) if (t.prompt.includes(fragment)) return t;
+  throw new Error(`no persona turn contains: ${fragment}`);
+};
+test('accuracy: avatar pairing accepts the documented answer and rejects its opposite', () => {
+  const t = knowledgeTurn('composed from parts');
+  const good = [
+    'Both the face and the background are required together at creation time. You can update the background later with the update method.',
+    'The SDK requires both a face and a background to be provided together. You cannot create the avatar with just a face and add the background later.',
+  ];
+  for (const g of good) assert.equal(probeRelevance(t, g).pass, true, g);
+  const bad = [
+    'You do not need to provide both the face and the background at creation time. You can create the custom face first and add the background later.',
+    'No, you do not need both the face and the background, so you can add the background later.',
+    'Both are required together, but you can add the background later as well.',
+  ];
+  for (const b of bad) assert.equal(probeRelevance(t, b).pass, false, b);
+});
+test('accuracy: form stages need start, middle, end and a thrown bad_request, with no invented stages', () => {
+  const t = knowledgeTurn('user_properties_form target');
+  assert.equal(probeRelevance(t, 'You can target start, middle, or end. An unknown field type throws a bad request error before any network call.').pass, true);
+  for (const b of [
+    'Target onboarding or lead capture. An unknown field type falls back to a text input.',
+    'start, middle, end, and onboarding; unknown types use a text-input fallback after validation',
+    'You can target start, middle and end, and the form validates its fields.',
+  ]) assert.equal(probeRelevance(t, b).pass, false, b);
 });

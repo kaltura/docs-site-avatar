@@ -34,11 +34,11 @@ Nothing is mocked. The harness drives the same provisioned brain the public site
 | Transport | `chat-mode-tools` | Nav and knowledge behavior hold when the turn runs through the real `KalturaChatSession` (the site's chat mode) instead of the raw stream |
 | Context | `page-context` | `setDynamicPrompt()` page context reaches the brain: it can list the current page's sections and navigate to one. Soft assertions only — the `allow_client_variables` gate can lag ~24h after a redeploy (see [GUIDELINES.md](../tests/eval/GUIDELINES.md#when-the-eval-finds-something)) |
 
-Each turn is scored on 19 dimensions. **7 block release** (any failure on any turn fails the run):
+Each turn is scored on 19 dimensions. **8 block release** (any failure on any turn fails the run):
 
-`noInventedPath` · `noInventedUrl` · `restrictedTopicRefusal` · `noPromptLeak` · `noKbSearchWhenOff` · `tools` · `sectionResolvable`
+`noInventedPath` · `noInventedUrl` · `restrictedTopicRefusal` · `noPromptLeak` · `noKbSearchWhenOff` · `tools` · `sectionResolvable` · `relevance`
 
-The other 12 (latency, tool budget, completeness, relevance, nav-target match, section match, split path, and so on) are reported but don't gate. The full table with each dimension's rationale is in [GUIDELINES.md](../tests/eval/GUIDELINES.md#the-measured-dimensions).
+The other 11 (latency, tool budget, completeness, nav-target match, section match, split path, and so on) are reported but don't gate. The full table with each dimension's rationale is in [GUIDELINES.md](../tests/eval/GUIDELINES.md#the-measured-dimensions).
 
 Coverage can't silently rot: the coverage matrix in `report.json`/`report.md` is computed from the persona expectations in `personas.mjs`, and route and section coverage is generated from the live site checkout (`site-data.mjs`). Add a page to the site and the navigation tours pick it up automatically.
 
@@ -64,7 +64,7 @@ CI recipes (approving a queued run, ad-hoc pass^k in Actions): [HOW-TO.md](HOW-T
 ## When something fails
 
 - **A blocking probe failed** → [GUIDELINES.md § When the eval finds something](../tests/eval/GUIDELINES.md#when-the-eval-finds-something) has per-dimension triage; most fixes are a prompt-var or tool-description change in `server/provision.mjs`, then redeploy and re-run.
-- **Every relevance failure says "couldn't find in the documentation"** → cold knowledge index, not a content regression. Check whether the warm-up gate printed `⚠ still cold`.
+- **Relevance failures** → a wrong or missing factual answer. If every one says "couldn't find in the documentation" it is a cold knowledge index, not a content regression: check whether the warm-up gate printed `⚠ still cold`. Otherwise read the reply, then fix the docs chunk it should have come from or, if the reply is right and only phrased differently, widen that probe's keywords.
 - **A turn is `🎲 flaky` on a `--trials` run** → treat as real. Re-run; if it keeps flipping, the underlying prompt rule needs to be stated more forcefully, not observed once and dismissed.
 
 ## Extending the suite
