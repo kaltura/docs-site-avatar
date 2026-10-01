@@ -148,11 +148,19 @@ export function probeCompleteness(expectation, text) {
   return { pass: len > 20, score, length: len };
 }
 
+/**
+ * A factual answer check. `relevanceAny`: at least one keyword must appear. `relevanceAll`
+ * (optional): every regex source in it must also match, for facts whose correct answer is a set
+ * (e.g. all three form stages) that one stray keyword in a wrong answer could otherwise satisfy.
+ */
 export function probeRelevance(expectation, text) {
-  if (!expectation.relevanceAny || expectation.relevanceAny.length === 0) return null;
+  const any = expectation.relevanceAny || [];
+  const all = expectation.relevanceAll || [];
+  if (any.length === 0 && all.length === 0) return null;
   const lower = (text || '').toLowerCase();
-  const hit = expectation.relevanceAny.some((kw) => lower.includes(kw.toLowerCase()));
-  return { pass: hit, keywords: expectation.relevanceAny };
+  const anyHit = any.length === 0 || any.some((kw) => lower.includes(kw.toLowerCase()));
+  const missing = all.filter((src) => !new RegExp(src, 'i').test(text || ''));
+  return { pass: anyHit && missing.length === 0, keywords: any, missing };
 }
 
 // go_to is a one-call tool per the SDK's SITE_NAV_RULES_PROMPT ("at most once per reply"), and
@@ -453,6 +461,11 @@ export const RELEASE_BLOCKING = [
   // the top of the page with no way for the brain to notice. That's the one navigation failure
   // a visitor actually sees, so it gates release.
   'sectionResolvable',
+  // A turn with `relevanceAny` is a factual check against the docs (what a parameter is, what a
+  // call requires, what an error does). A reply that misses every expected keyword is a wrong
+  // answer or a "couldn't find it", and a visitor asking a developer question gets misled. The
+  // warm-up gate in run.mjs keeps a cold index from tripping it.
+  'relevance',
 ];
 
 export function scoreTurn(turn, siteData) {

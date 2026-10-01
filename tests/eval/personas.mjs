@@ -234,7 +234,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'I want a custom avatar face composed from parts instead of a template — do I need both a face and a background at creation time, or can I add the background later?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['both required', 'both need', 'required together', 'together at create', 'need both', 'must provide both', 'must pass both', 'both are required', 'requires both', 'both ids together', 'both of their ids'],
+          relevanceAny: ['both required', 'both need', 'required together', 'together at create', 'need both', 'must provide both', 'must pass both', 'both are required', 'requires both', 'both ids together', 'both of their ids', 'provided together', 'passed together', 'supplied together', 'both the face and the background'],
         },
         {
           prompt: 'Can avatars.update() change just the background on an existing avatar without touching its current face?',
@@ -289,7 +289,9 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Which conversation stages can a user_properties_form target, and what happens if I pass an unknown field type?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['middle', 'start', 'bad_request', 'typed error', 'throws', 'validation'],
+          relevanceAny: ['bad_request', 'bad request', 'typed error', 'throws', 'validation', 'validates'],
+          // A right answer names all three stages; invented ones ("onboarding", "lead capture") miss these.
+          relevanceAll: ['\\bstart\\b', '\\bmiddle\\b', '\\bend\\b'],
         },
         {
           prompt: 'Which session method sends the viewer’s structured form answers back to the brain, and does calling it make the avatar talk?',

@@ -103,6 +103,22 @@ test('relevance: no keyword hit fails', () => {
   assert.equal(r.pass, false);
 });
 
+test('relevance: relevanceAll needs every pattern, even when a keyword hits', () => {
+  const exp = { relevanceAny: ['throws'], relevanceAll: ['\\bstart\\b', '\\bmiddle\\b', '\\bend\\b'] };
+  assert.equal(probeRelevance(exp, 'Stages are start, middle and end. It throws.').pass, true);
+  const wrong = probeRelevance(exp, 'Target onboarding or lead capture at the start. It throws.');
+  assert.equal(wrong.pass, false);
+  assert.deepEqual(wrong.missing, ['\\bmiddle\\b', '\\bend\\b']);
+});
+test('relevance: relevanceAll alone is enough to activate the probe', () => {
+  assert.equal(probeRelevance({ relevanceAll: ['mit'] }, 'MIT').pass, true);
+});
+test('relevance: a miss is release-blocking', () => {
+  const s = scoreTurn({ expectation: { relevanceAny: ['mit'], skipCompleteness: true }, latencyMs: 1500, text: 'It is free to use, quite permissive and open.', toolCalls: [] }, {});
+  assert.deepEqual(s.releaseBlockingFails, ['relevance']);
+  assert.equal(s.healthy, false);
+});
+
 /* single tool call per turn */
 test('singleToolCallPerTurn: one call of a strict tool plus another tool passes', () => {
   const r = probeSingleToolCallPerTurn([{ name: 'go_to' }, { name: 'get_experience_instructions' }]);

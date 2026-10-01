@@ -77,39 +77,52 @@ if (trials > 1) log(`▶ running ${trials} trials per persona for pass^k reliabi
  * Knowledge-retrieval warm-up gate. `isIndexed` reporting ready during provisioning does NOT
  * mean fine-grained retrieval is warm: a CI eval that started 3s after a redeploy scored 65%
  * relevance with every failing reply saying "couldn't find in the documentation", while the
- * identical eval against the identical knowledge record passed 100% hours later. So before
- * scoring anything, ask one section-granularity canary question that only the knowledge base
- * (not keyFacts or the site map) can answer, and hold the run until the brain answers it.
- * Proceeds with a loud warning if the window is exhausted — the eval then fails honestly.
+ * identical eval against the identical knowledge record passed 100% hours later. A later run
+ * passed its single canary on attempt 1 and still had two factual answers come back wrong,
+ * because the index warms document by document. So before scoring anything, ask one
+ * section-granularity question per docs area (facts only the knowledge base, not keyFacts or
+ * the site map, can answer) and hold the run until the brain answers ALL of them correctly in
+ * the same attempt. Proceeds with a loud warning if the window is exhausted; the relevance
+ * failures that follow are release-blocking, so the run fails honestly.
  */
-const WARMUP_PROMPT = 'What is the default maxRendered cap on the ExperienceRenderer?';
-const WARMUP_PASS = /\b100\b|hundred/i;
+const WARMUP_CANARIES = [
+  { name: 'experience renderer', prompt: 'What is the default maxRendered cap on the ExperienceRenderer?', pass: /\b100\b|hundred/i },
+  { name: 'avatar create', prompt: 'When I compose an avatar from parts, can I create it with just a face and add the background later?', pass: /required together|both[^.]{0,40}required|requires both|provided together|together at creat/i },
+  { name: 'structured forms', prompt: 'Which conversation stages can a user_properties_form target?', pass: (t) => [/\bstart\b/i, /\bmiddle\b/i, /\bend\b/i].every((re) => re.test(t)) },
+  { name: 'request vars', prompt: 'What must be enabled on the intellect before I can pass my own request_vars with a converse message?', pass: /allow[_ ]client[_ ]variables/i },
+];
 const WARMUP_ATTEMPTS = 20;
 const WARMUP_DELAY_MS = 60_000;
 const WARMUP_TURN_TIMEOUT_MS = 30_000;
 
+async function askCanary(canary, attempt) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), WARMUP_TURN_TIMEOUT_MS);
+  try {
+    const { text } = await streamTurn({ management, configId: agent.configId, message: canary.prompt, signal: ctrl.signal });
+    return typeof canary.pass === 'function' ? canary.pass(text || '') : canary.pass.test(text || '');
+  } catch (e) {
+    log(`  ! warm-up attempt ${attempt}/${WARMUP_ATTEMPTS} (${canary.name}) errored: ${e.message}`);
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function warmUpKnowledgeRetrieval() {
   for (let attempt = 1; attempt <= WARMUP_ATTEMPTS; attempt++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), WARMUP_TURN_TIMEOUT_MS);
-    let text = '';
-    try {
-      ({ text } = await streamTurn({ management, configId: agent.configId, message: WARMUP_PROMPT, signal: ctrl.signal }));
-    } catch (e) {
-      log(`  ! warm-up attempt ${attempt}/${WARMUP_ATTEMPTS} errored: ${e.message}`);
-    } finally {
-      clearTimeout(timer);
-    }
-    if (WARMUP_PASS.test(text)) {
-      log(`✓ knowledge retrieval warm (canary answered on attempt ${attempt})`);
+    const cold = [];
+    for (const canary of WARMUP_CANARIES) if (!(await askCanary(canary, attempt))) cold.push(canary.name);
+    if (cold.length === 0) {
+      log(`✓ knowledge retrieval warm (${WARMUP_CANARIES.length} canaries answered on attempt ${attempt})`);
       return;
     }
     if (attempt < WARMUP_ATTEMPTS) {
-      log(`… knowledge retrieval still cold (attempt ${attempt}/${WARMUP_ATTEMPTS}) — waiting ${WARMUP_DELAY_MS / 1000}s`);
+      log(`… knowledge retrieval still cold for ${cold.join(', ')} (attempt ${attempt}/${WARMUP_ATTEMPTS}) — waiting ${WARMUP_DELAY_MS / 1000}s`);
       await new Promise((r) => setTimeout(r, WARMUP_DELAY_MS));
     }
   }
-  log(`⚠ knowledge retrieval still cold after ${WARMUP_ATTEMPTS} attempts (~${Math.round((WARMUP_ATTEMPTS * WARMUP_DELAY_MS) / 60000)} min) — running the eval anyway; expect relevance failures`);
+  log(`⚠ knowledge retrieval still cold after ${WARMUP_ATTEMPTS} attempts (~${Math.round((WARMUP_ATTEMPTS * WARMUP_DELAY_MS) / 60000)} min) — running the eval anyway; expect release-blocking relevance failures`);
 }
 
 if (!process.argv.includes('--no-warmup')) {

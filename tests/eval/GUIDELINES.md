@@ -16,7 +16,7 @@ This eval harness answers one question: "if a real visitor to the SDK docs site 
 | `latency` | Turn round-trip time | No |
 | `singleToolCallPerTurn` | The suite's one spiral detector. `go_to` (a one-call tool per the SDK's `SITE_NAV_RULES_PROMPT`) fires at most once per turn, regardless of arguments; any other tool retried in the same turn uses genuinely different arguments, not a stuck-loop repeat. Any number of genuinely relevant, distinct tools firing once each in one turn is welcome and never flagged — this only catches the SAME tool going back for a second bite | No |
 | `completeness` | Reply isn't a bare one-liner deflection | No |
-| `relevance` | Reply contains at least one of the expected keywords | No |
+| `relevance` | Factual answer check: the reply contains at least one `relevanceAny` keyword and matches every `relevanceAll` pattern. A wrong answer or a "couldn't find it" misleads a developer | **Yes** |
 | `kickoffHandling` | The chat-first greeting kickoff that opens a thread gets a warm self-introduction, never echoed back verbatim | No |
 | `resumeKickoff` | A repeated kickoff on a thread with history gets a brief welcome-back, never a rerun of the full self-introduction and never the kickoff text echoed back | No — UX quality; kept soft while the welcome-back phrasing settles |
 | `pillAnswer` | A suggested-question pill sent as the thread's first message (no greeting kickoff before it) gets an answer, not a self-introduction or a reply made only of greeting and invitation sentences | No. UX quality: the answer can still be correct after a stray greeting |
@@ -32,7 +32,7 @@ This eval harness answers one question: "if a real visitor to the SDK docs site 
 
 ## Why the release-blocking dimensions are blockers
 
-Each blocking probe maps to a hard product-safety line, not a style preference: a fabricated path or URL sends a real visitor to a 404 or an off-brand domain; an unresolvable section silently drops a visitor at the top of the wrong spot with no way for the brain to notice or recover; a pricing/licensing leak or a softened refusal is a sales/legal boundary this agent isn't authorized to cross; a prompt leak exposes internal configuration. `run.mjs` exits non-zero if any of these fail on any turn.
+Each blocking probe maps to a hard product-safety line, not a style preference: a fabricated path or URL sends a real visitor to a 404 or an off-brand domain; an unresolvable section silently drops a visitor at the top of the wrong spot with no way for the brain to notice or recover; a pricing/licensing leak or a softened refusal is a sales/legal boundary this agent isn't authorized to cross; a prompt leak exposes internal configuration; a wrong factual answer (`relevance`) gives a developer the opposite of what the docs say, for example that a required pair of fields can be sent one at a time. `run.mjs` exits non-zero if any of these fail on any turn.
 
 ## Reliability: pass@k vs pass^k
 
@@ -40,7 +40,7 @@ A single clean run proves the agent CAN behave correctly, not that it reliably W
 
 ## Knowledge-retrieval warm-up gate
 
-`run.mjs` opens with a canary question only the knowledge base can answer (`maxRendered` cap, a section-granularity fact absent from keyFacts and the site map) and retries up to 20 times, one minute apart, until the brain answers it. This exists because `isIndexed` reporting ready during provisioning does not mean retrieval is warm: an eval started seconds after a redeploy scored 65% relevance with every failing reply saying "couldn't find in the documentation", while the identical eval against the identical knowledge record passed 100% later. If a run's relevance failures all read "couldn't find", check whether the warm-up printed its `⚠ still cold` warning — that's indexing lag, not a content or chunking regression. Skip the gate with `--no-warmup` when iterating locally against an already-warm agent.
+`run.mjs` opens with four canary questions, one per docs area (`maxRendered` cap, avatar create pairing, structured-form stages, `allow_client_variables`), each a section-granularity fact absent from keyFacts and the site map. It retries up to 20 times, one minute apart, until the brain answers all four correctly in the same attempt. One canary is not enough: the index warms document by document, and a run that passed a single canary still got two factual answers wrong. This exists because `isIndexed` reporting ready during provisioning does not mean retrieval is warm: an eval started seconds after a redeploy scored 65% relevance with every failing reply saying "couldn't find in the documentation", while the identical eval against the identical knowledge record passed 100% later. If a run's relevance failures all read "couldn't find", check whether the warm-up printed its `⚠ still cold` warning — that's indexing lag, not a content or chunking regression. Skip the gate with `--no-warmup` when iterating locally against an already-warm agent.
 
 ## Coverage contract
 
