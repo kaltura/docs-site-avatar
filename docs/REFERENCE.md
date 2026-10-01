@@ -57,6 +57,7 @@
 | `--reuse <configId>` | Update this intellect instead of creating one |
 | `--avatar-id <existingAvatarId>` | Skip the preset pick, use this avatar as-is |
 | `--agent-id <existingAgentId>` | Update this agent in place, keeping its `widgetId` |
+| `--rebuild` | With `--reuse`: build a new knowledge corpus even if the docs hash is unchanged. The old one is deleted only after the intellect points at the new one |
 | `--cleanup` | Delete the agent/avatar/intellect recorded in `server/agent.json` plus the knowledge corpus the intellect links (discovered live) |
 | `--dry-run` | With `--cleanup`: list what would be deleted, make no API calls |
 | `--only <types>` | With `--cleanup`: limit to a comma-separated subset of `agent,avatar,intellect,knowledge` |
