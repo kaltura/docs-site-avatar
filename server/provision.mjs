@@ -77,7 +77,7 @@ const BASE_URL = 'https://kaltura.github.io/intelligent-agents-sdk';
 // renderer's framing spec (see intelligent-agents-sdk/docs/api/design.md § Upload a
 // Custom Visual). The stream shows her on a flat green backdrop; the docs site keys
 // it out live with the SDK's chroma-key plugin so she stands on the page.
-const DEFAULT_VISUAL_ID = '9de5e101-c3c4-43ed-9543-45a2f20e28f1';
+const DEFAULT_VISUAL_ID = '0b8dc640-c0a6-45e7-913d-047c3d1411b9';
 const DEFAULT_VOICE_ID = '625jGFaa0zTLtQfxwc6Q';
 // Single source of truth for the declared persona name — feeds both the
 // `name` prompt below and lintPersonaIdentity's drift check (see issue #32:
