@@ -5,6 +5,13 @@ on:
     branches: [main]
     paths:
       - server/provision.mjs
+  # Nightly, so a docs deploy reaches the knowledge base within a day. A run whose docs hash
+  # matches skips the upload, so this is cheap. It waits for `production` approval like any run.
+  schedule:
+    - cron: '17 3 * * *'
+  # Lets the docs site call this workflow right after it deploys (event type: site-updated).
+  repository_dispatch:
+    types: [site-updated]
   workflow_dispatch:
     inputs:
       rebuild:
@@ -84,8 +91,9 @@ jobs:
             echo "- avatarId: ${{ steps.ids.outputs.avatar-id }}"
             echo ""
             echo "provision.mjs discovers the intellect's current knowledge corpus live and compares"
-            echo "the docs hash stored on its category with the docs in the site checkout. Same hash:"
-            echo "the corpus is reused. Different hash: a new corpus is built next to the old one, indexing is polled via"
+            echo "the docs hash stored on its category with the docs in the site checkout. Same hash and"
+            echo "every entry indexed: the corpus is reused. Otherwise a new corpus is built next to the old one, indexing is polled via"
             echo "\`kaltura.knowledge.entryStatus\`, and \`use_knowledge_base:'on'\` is written in the"
-            echo "same intellect update, then the old corpus is deleted (see docs/ARCHITECTURE.md). Nothing is committed back."
+            echo "same intellect update, then the old corpus is deleted (see docs/ARCHITECTURE.md)."
+            echo "The run fails if indexing is not confirmed. Nothing is committed back."
           } >> "$GITHUB_STEP_SUMMARY"
