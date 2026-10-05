@@ -57,7 +57,7 @@ Coverage can't silently rot: the coverage matrix in `report.json`/`report.md` is
 | `tests/eval/run.mjs` | The full scored run. Writes `tests/eval/artifacts/`: `report.md` (human), `report.json` (machine, with a `_meta` provenance receipt), `transcript.json` (raw turns for external judging), `history/` (past runs) |
 | `npm run eval:dashboard` | Same scoring engine, streamed live to a browser at `http://localhost:8093`: progress, run-history trends, persona inventory, and an ad-hoc single-prompt Quick Test |
 | `npm run test:eval:unit` | Offline unit tests for every probe and for `provision.mjs`, no credentials or network |
-| CI | `ci.yml` runs on every PR with no secrets (syntax check, unit tests, secret scan). `eval.yml` queues automatically after every redeploy and takes a manual `trials` input; both wait for `production`-environment approval, and the full artifacts directory is attached to the run |
+| CI | `ci.yml` runs on every PR with no secrets (syntax check, unit tests, secret scan). `eval.yml` queues automatically after every redeploy and takes a manual `trials` input; `eval.yml` first fails fast if the knowledge base is not fully indexed (`--verify-knowledge`). Both wait for `production`-environment approval, and the full artifacts directory is attached to the run |
 
 CI recipes (approving a queued run, ad-hoc pass^k in Actions): [HOW-TO.md](HOW-TO.md#run-the-eval-suite-in-ci).
 

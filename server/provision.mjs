@@ -20,13 +20,17 @@
  * CURRENT knowledge corpus live (intellect → record → category → entries, see
  * discoverKnowledge) and compares the docs fingerprint stored on that category
  * (`referenceId`, see hashDocs and wireKnowledge) with the docs read from
- * --site-dir. Same hash: the corpus is reused as-is and the re-upload/indexing-wait is
- * skipped (--rebuild forces a new corpus anyway). Different hash: wireKnowledge builds a
+ * --site-dir. Same hash and one status pass shows every entry indexed: the corpus is reused as-is and the
+ * re-upload/indexing-wait is skipped (--rebuild forces a new corpus anyway). Same hash but entries
+ * not indexed: treated like a different hash. Different hash: wireKnowledge builds a
  * NEW corpus while the intellect keeps serving the old one, the intellect is repointed to the
  * new one, and only then is the old one deleted (see deleteKnowledge), so Nova's knowledge base
  * is never missing and repeated redeploys (e.g. from CI) never orphan a corpus. A failure before
- * the repoint removes the half-built new corpus and leaves the old one untouched. Nothing about
- * the corpus is written to disk; server/agent.json holds only the stable ids.
+ * the repoint removes the half-built new corpus and leaves the old one untouched. The docs hash
+ * is stored on the new category only once the indexing poll confirms every entry indexed. A poll
+ * that times out or ends with error-status entries still finishes the deploy (the new corpus is
+ * live), then the run exits non-zero and, with no hash stored, the next run rebuilds the corpus.
+ * Nothing about the corpus is written to disk; server/agent.json holds only the stable ids.
  *
  * Run:  AGENTIC_PARTNER_ID=… AGENTIC_ADMIN_SECRET=… node server/provision.mjs
  *       [--site-dir <path>]                  # read the docs site's src/**\/*.md from
@@ -40,6 +44,8 @@
  *       [--agent-id <existingAgentId>]        # update this agent in place, keep its widgetId
  *       [--rebuild]                           # with --reuse: build a new corpus even if the docs
  *                                             # hash is unchanged
+ *       --verify-knowledge                    # read-only: exit non-zero unless the intellect in
+ *                                             # server/agent.json links a fully indexed corpus
  *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag, ...any
  *         hand-recorded extra fields, carried forward as-is }, first backing up any
  *         PREVIOUS agent.json to server/agent.json.bak. A --reuse run with the same
@@ -47,7 +53,7 @@
  * Teardown:  node server/provision.mjs --cleanup
  */
 import { readFileSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -148,11 +154,6 @@ export function stripFrontmatter(text) {
  * headings at all (its body sits under `### `) gets the same split on its intro chunk.
  */
 export const SUBCHUNK_THRESHOLD = 6000;
-
-/** Bumped whenever the chunk text `splitIntoSections` emits changes shape (provenance lines,
- * split rules). It is folded into `hashDocs`, so a chunker change forces the next `--reuse`
- * deploy to re-upload the corpus even when the site's markdown is byte-identical. */
-export const CHUNK_FORMAT = 'chunks-v7:split-intro-subsections';
 
 /** The navigation line every non-first chunk carries (a ### sub-chunk adds a "Part of section"
  * line after it): the complete, copy-as-is JSON argument object for a go_to call that lands on
@@ -376,6 +377,32 @@ export function githubSlugify(s) {
   return String(s).trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s/g, '-');
 }
 
+/** A fixed page that walks every branch of `splitIntoSections`: an oversized intro split at `###`,
+ * a target wrapper, in-page and cross-page links, a fenced `##`, oversized `##` sections split at
+ * `###` (with and without a heading-only preamble), and a closing-hash heading. */
+const CHUNKER_SAMPLE_PAGE = { path: '/sample/', sections: [{ key: 'alpha', id: 'alpha' }, { key: 'beta', id: 'beta' }, { key: 'target-one', id: 'target-one' }] };
+const CHUNKER_SAMPLE = (() => {
+  const filler = 'Filler sentence. '.repeat(Math.ceil(SUBCHUNK_THRESHOLD / 17) + 1);
+  return [
+    '# Sample', '', 'Intro with [an anchor](#alpha) and [another page](/other/#part).', '',
+    '### Intro one', '', filler, '### Intro two', '', 'Short.', '',
+    '## Alpha', '', '<div data-nova-target="target-one" data-nova-label="Table one">', '', '| a | b |', '', '</div>', '',
+    '```', '## Not a heading', '```', '',
+    '## Beta', '', 'Preamble.', '', '### Beta one', '', filler, '### Beta two', '', 'Short.', '',
+    '## Gamma', '', '### Gamma one', '', filler, '### Gamma two', '', 'Short.', '',
+    '## Delta ##', '', 'Short.',
+  ].join('\n');
+})();
+
+/** The chunker's version, derived from what it emits for CHUNKER_SAMPLE, so editing the chunker
+ * changes it with no hand bump. It is folded into `hashDocs`, so a chunker change forces the next
+ * `--reuse` deploy to re-upload the corpus even when the site's markdown is byte-identical. */
+export function chunkFormat(split = splitIntoSections) {
+  const chunks = split(CHUNKER_SAMPLE, { url: CHUNKER_SAMPLE_PAGE.path }, CHUNKER_SAMPLE_PAGE);
+  return `chunks-${createHash('sha256').update(JSON.stringify(chunks)).digest('hex').slice(0, 12)}`;
+}
+export const CHUNK_FORMAT = chunkFormat();
+
 /** The exact list of real pages this intellect may ever cite: every page in the go_to sections
  * manifest, each resolved to its on-disk file. The manifest is built from the site's rendered
  * output, so it lists every published page, including sub-pages that nav.js leaves out. Using it
@@ -385,10 +412,36 @@ export function docsFromManifest(manifest) {
   return manifest.pages.map((p) => ({ title: p.title || '', url: p.path, file: fileForUrl(p.path) }));
 }
 
+/** Every page source under `<siteDir>/src`, as paths relative to it. Every `.md` there is a page
+ * except the Eleventy data and include folders. */
+export async function listSourceFiles(siteDir) {
+  const all = await readdir(join(siteDir, 'src'), { recursive: true });
+  return all.map((f) => f.replaceAll('\\', '/')).filter((f) => f.endsWith('.md') && !/^_(data|includes)\//.test(f));
+}
+
+/** Compare the manifest's pages with the checkout's page sources. `missingSource` holds manifest
+ * page paths with no source file (a page removed from the checkout but still published);
+ * `unpublished` holds source files with no manifest page (a page not published yet). */
+export function findDocMismatch(docs, sourceFiles) {
+  const have = new Set(sourceFiles);
+  const wanted = new Set(docs.map((d) => d.file));
+  return {
+    missingSource: docs.filter((d) => !have.has(d.file)).map((d) => d.url),
+    unpublished: sourceFiles.filter((f) => !wanted.has(f)).sort(),
+  };
+}
+
 /** Reads + frontmatter-strips every doc ONCE, attaching `.markdown` (for wireKnowledge and
- * hashDocs) in place. A manifest page with no source file means the checkout and the published
- * site disagree; fail with the path tried rather than shipping a corpus with a hole in it. */
-async function loadDocContent(siteDir, docs) {
+ * hashDocs) in place. The manifest and the checkout must list the same pages: a page in only one
+ * of them would ship a corpus with a hole in it, or fail late on a missing file, so every
+ * mismatched page is named up front. */
+export async function loadDocContent(siteDir, docs) {
+  const { missingSource, unpublished } = findDocMismatch(docs, await listSourceFiles(siteDir));
+  if (missingSource.length || unpublished.length) {
+    throw new Error(`the sections manifest and the docs checkout at ${siteDir} list different pages. `
+      + `In the manifest only: ${missingSource.join(', ') || 'none'}. In the checkout only: ${unpublished.join(', ') || 'none'}. `
+      + 'Wait for the site deploy to finish, or pass --sections-file with a manifest built from this checkout.');
+  }
   for (const doc of docs) {
     const file = join(siteDir, 'src', doc.file);
     let text;
@@ -590,9 +643,19 @@ async function provisionSteps(ctx) {
   // A discovery failure is deliberately fatal here: it happens before any write, and
   // proceeding blind would upload a second corpus while orphaning the one still linked.
   const live = reuseConfigId ? await discoverKnowledge(admin, reuseConfigId) : null;
-  const knowledgeUnchanged = !!live && !forceRebuild && live.docsHash === docsHash;
+  let knowledgeUnchanged = !!live && !forceRebuild && live.docsHash === docsHash;
+  // The hash is stored only after an indexing poll confirmed the corpus, but a matching hash is
+  // not enough to skip the work: one status pass must still show every entry indexed.
+  if (knowledgeUnchanged) {
+    const problem = indexProblem(await pollEntryStatus(admin, live.recordIds[0], live.entryIds, 0));
+    if (problem) {
+      console.log(`… docs hash matches but the live corpus is not fully indexed (${problem}), rebuilding`);
+      knowledgeUnchanged = false;
+    }
+  }
 
   let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, indexed;
+  const problems = []; // what makes this run exit non-zero once the deploy itself is finished
   let newCorpus = null; // set only when this run builds a corpus
   // The indexer works in batch passes: an entry is usually searchable 15 to 30 minutes after it
   // was uploaded, and entries uploaded early finish while later ones are still uploading. So this
@@ -622,7 +685,7 @@ async function provisionSteps(ctx) {
       }
       await deleteKnowledge(admin, newCorpus);
     };
-    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs, manifest, docsHash, newCorpus));
+    ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs, manifest, newCorpus));
 
     // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
     // send it in that single add/update call alongside knowledge_ids — never as a follow-up
@@ -643,8 +706,10 @@ async function provisionSteps(ctx) {
     // check. It omits an entry until the indexer picks it up, then reports a per-document
     // `status`: null while queued, a final value once finished (see entryIndexState).
     console.log(`… polling knowledge record ${knowledgeRecordId} for indexing completion (up to ${INDEX_WAIT_MS / 60_000} min)`);
-    await pollEntryStatus(admin, knowledgeRecordId, knowledgeEntryIds, INDEX_WAIT_MS);
-    indexed = true; // a slow or failed index never turns RAG off, see pollEntryStatus
+    const tally = await pollEntryStatus(admin, knowledgeRecordId, knowledgeEntryIds, INDEX_WAIT_MS);
+    indexed = true; // a slow or failed index never turns RAG off, but it does fail the run below
+    const problem = await storeHashIfIndexed(tally, () => storeDocsHash(admin, knowledgeCategoryId, docsHash));
+    if (problem) problems.push(`knowledge corpus not confirmed indexed (${problem}); no docs hash stored, so the next run rebuilds it`);
   }
 
   const existingTools = await kaltura.tools.list(admin).all();
@@ -781,7 +846,8 @@ async function provisionSteps(ctx) {
   // The outgoing corpus is safe to delete.
   if (live && newCorpus) {
     console.log(`✓ removing previous knowledge corpus (record ${live.recordIds.join(',') || 'none'}, category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries)`);
-    await deleteKnowledge(admin, live);
+    const leftovers = (await deleteKnowledge(admin, live)).filter((f) => f.kind !== 'record');
+    if (leftovers.length) problems.push(`${leftovers.length} delete call(s) for the previous corpus failed, so its entries or category may be orphaned`);
   }
 
   let avatar;
@@ -849,6 +915,7 @@ async function provisionSteps(ctx) {
   console.log('\n✅ provisioned. Wrote', OUT);
   console.log(JSON.stringify(out, null, 2));
   console.log(`knowledge: category ${knowledgeCategoryId}, record ${knowledgeRecordId}, ${knowledgeEntryIds.length} entries, docs hash ${docsHash}`);
+  if (problems.length) throw new Error(`deploy finished, but: ${problems.join('; ')}`);
   console.log(knowledgeUnchanged
     ? `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, reused as-is (docs unchanged, no re-upload/wait needed).`
     : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after polling kaltura.knowledge.entryStatus() for indexing completion (budget ${INDEX_WAIT_MS / 60_000} min).`);
@@ -863,6 +930,29 @@ export async function withRollback(task, undo, log = console.error) {
   } catch (e) {
     await Promise.resolve().then(undo).catch((u) => log('rollback failed:', u.code || u.message));
     throw e;
+  }
+}
+
+/** True for a failure worth another try: a 5xx or 429 response, or no HTTP response at all (the
+ * SDK already retried a dropped connection). A 4xx or an OVP exception will fail the same way again. */
+export function isTransientError(e) {
+  if (typeof e?.status === 'number' && e.status > 0) return e.status >= 500 || e.status === 429;
+  return e?.code === 'server_error' || e?.code === 'rate_limited' || (!e?.status && !e?.code);
+}
+
+/** Run `fn`, retrying transient failures up to `attempts` times in total with doubling backoff
+ * (`baseMs`, 2x, 4x, ...). A non-transient error, or the last attempt's error, is rethrown as is.
+ * `wait` and `log` are injectable for tests. */
+export async function withRetry(fn, { attempts = 4, baseMs = 2_000, label = 'call', wait = sleep, log = console.log } = {}) {
+  for (let n = 1; ; n++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (n >= attempts || !isTransientError(e)) throw e;
+      const delay = baseMs * 2 ** (n - 1);
+      log(`  … ${label} failed (${e.code || e.message}), retry ${n}/${attempts - 1} in ${delay / 1000}s`);
+      await wait(delay);
+    }
   }
 }
 
@@ -881,9 +971,9 @@ export function entryIndexState(row) {
 }
 
 /** Poll kaltura.knowledge.entryStatus() until every entry has finished indexing, or budgetMs runs
- * out. Never gates the deploy: use_knowledge_base stays 'on' either way. A slow indexer and a
- * flaky status call are logged as a heads-up, and entries that finished with an error status are
- * named so a bad chunk does not pass as indexed. Returns the final tally.
+ * out. Never throws and never gates the deploy by itself: a slow indexer and a flaky status call
+ * are logged, and entries that finished with an error status are named so a bad chunk does not
+ * pass as indexed. Callers turn the returned tally into a verdict with `indexProblem`.
  * `fetchStatus`, `wait`, `now` and `log` are injectable for tests. */
 export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budgetMs, {
   fetchStatus = (ids) => kaltura.knowledge.entryStatus(knowledgeRecordId, ids, admin),
@@ -917,9 +1007,23 @@ export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budget
     await wait(intervalMs);
   }
   if (failed.size) log(`⚠ ${failed.size} entries finished indexing with an error status: ${[...failed].map(([id, st]) => `${id} ${st}`).join(', ')}`);
-  if (pending.size) log(`⚠ ${pending.size}/${entryIds.length} entries not confirmed indexed after ${Math.round((now() - startedAt) / 60_000)} min — enabling RAG anyway, they become searchable as the indexer reaches them`);
+  if (pending.size) log(`⚠ ${pending.size}/${entryIds.length} entries not confirmed indexed after ${Math.round((now() - startedAt) / 60_000)} min — the indexer has not reached them yet`);
   else if (!failed.size) log('✓ all entries confirmed indexed');
   return { indexed: entryIds.length - pending.size - failed.size, failed: [...failed.keys()], pending: [...pending] };
+}
+
+/** Why a poll tally is not a clean pass, or null when every entry is confirmed indexed. */
+export function indexProblem({ failed, pending }) {
+  if (!failed.length && !pending.length) return null;
+  return [failed.length && `${failed.length} with an error status`, pending.length && `${pending.length} not confirmed indexed`].filter(Boolean).join(', ');
+}
+
+/** Run `store` (the docs hash write) only when the poll `tally` is clean. Returns the problem
+ * text, or null after storing. */
+export async function storeHashIfIndexed(tally, store) {
+  const problem = indexProblem(tally);
+  if (!problem) await store();
+  return problem;
 }
 
 /**
@@ -933,12 +1037,13 @@ export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budget
  * follow-up patch — because provision() polls this record's indexing status (see the poll loop
  * right after this call returns) and resolves `capabilities.use_knowledge_base` BEFORE the
  * intellect is ever created/updated.
- * The category's `referenceId` is set to `docsHash` only after the LAST chunk uploaded, so a
- * run that dies mid-upload leaves a category with no hash and the next --reuse run replaces it.
+ * It does not store the docs hash: `storeDocsHash` does, only once the indexing poll confirmed
+ * every entry, so a run that dies mid-upload or ends with unindexed entries leaves a category
+ * with no hash and the next --reuse run replaces it.
  * Every id it creates is also pushed into `created` as it goes, so a caller can remove a
  * half-built corpus when this throws.
  */
-async function wireKnowledge(admin, docs, manifest, docsHash, created = { recordIds: [], categoryIds: [], entryIds: [] }) {
+async function wireKnowledge(admin, docs, manifest, created = { recordIds: [], categoryIds: [], entryIds: [] }) {
   const category = await kaltura.knowledge.findOrCreateCategory({ name: `${TAG}-knowledge-${Date.now()}` }, admin);
   created.categoryIds.push(category.id);
   console.log('✓ knowledge category', category.id);
@@ -963,16 +1068,20 @@ async function wireKnowledge(admin, docs, manifest, docsHash, created = { record
     const baseName = `${TAG}-${doc.file.replace(/\//g, '-')}`;
     for (let i = 0; i < sections.length; i++) {
       const name = sections.length > 1 ? `${baseName}-${i}` : baseName;
-      const uploaded = await kaltura.knowledge.uploadMarkdown({ markdown: sections[i], name, categoryId: category.id }, admin);
+      const uploaded = await withRetry(() => kaltura.knowledge.uploadMarkdown({ markdown: sections[i], name, categoryId: category.id }, admin), { label: `upload ${name}` });
       entryIds.push(uploaded.entryId);
     }
     console.log(`✓ uploaded ${doc.file} to knowledge category (${sections.length} chunk${sections.length === 1 ? '' : 's'})`);
   }
 
-  await ovp(admin, 'category', 'update', { id: category.id, category: { objectType: 'KalturaCategory', referenceId: docsHash } });
-  console.log(`✓ stored docs hash ${docsHash.slice(0, 12)}… on category ${category.id}`);
-
   return { categoryId: category.id, recordId: record.id, entryIds };
+}
+
+/** Store the docs fingerprint on the knowledge category (`referenceId`). The next --reuse run
+ * trusts it as proof that the corpus was fully uploaded and indexed. */
+async function storeDocsHash(admin, categoryId, docsHash) {
+  await ovp(admin, 'category', 'update', { id: categoryId, category: { objectType: 'KalturaCategory', referenceId: docsHash } });
+  console.log(`✓ stored docs hash ${docsHash.slice(0, 12)}… on category ${categoryId}`);
 }
 
 const OVP_BASE = 'https://www.kaltura.com/api_v3';
@@ -1040,29 +1149,89 @@ async function discoverKnowledge(admin, configId) {
   return state;
 }
 
+/** One OVP multirequest. Returns the per-call result list, in call order. Each result can be a
+ * `KalturaAPIException` inside an HTTP 200, so callers read every element (see multirequestFailures). */
+async function ovpMultirequest(admin, calls) {
+  const body = { apiVersion: '19.14.0', format: 1 };
+  calls.forEach((c, i) => { body[i] = { ks: admin.ks, ...c }; });
+  const res = await fetch(`${OVP_BASE}/service/multirequest`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`multirequest HTTP ${res.status}`);
+  const data = await res.json();
+  if (!Array.isArray(data)) throw new Error(`multirequest ${data?.code || data?.objectType || 'returned no result list'}`);
+  return data;
+}
+
+/** The delete calls whose result is an exception. "Not found" counts as deleted already. */
+export function multirequestFailures(calls, results) {
+  return calls.flatMap((c, i) => {
+    const r = results[i];
+    const kind = c.service === 'category' ? 'category' : 'entry';
+    const id = c.entryId ?? c.id;
+    if (!r) return [{ kind, id, code: 'NO_RESULT' }];
+    if (r.objectType !== 'KalturaAPIException' || /_NOT_FOUND$/.test(r.code)) return [];
+    return [{ kind, id, code: r.code }];
+  });
+}
+
+/** One line for a cleanup's failures, naming at most the first few. */
+export function summarizeDeleteFailures(failures, max = 10) {
+  const shown = failures.slice(0, max).map((f) => `${f.kind} ${f.id}: ${f.code}`).join('; ');
+  return `${failures.length} knowledge delete(s) failed: ${shown}${failures.length > max ? `; and ${failures.length - max} more` : ''}`;
+}
+
 /**
  * Delete knowledge records + their categories + every entry in them. Used three ways: `cleanup()`
  * on the intellect's current corpus, `provision()` on the outgoing corpus once the intellect has
  * been repointed to the new one, and `provision()` on a half-built new corpus when the build or
  * the repoint fails. Without the first two, every `--reuse` redeploy would orphan the prior
  * category/record/entries.
+ * Never throws. Returns every failure as `{kind: 'record'|'entry'|'category'|'batch', id, code}`
+ * and logs them as one summary. A record that held indexed content is expected to fail (see
+ * ARCHITECTURE.md "Known limitations"), so callers treat `record` failures as a warning only.
+ * `deleteRecord`, `multirequest` and `log` are injectable for tests.
  */
-async function deleteKnowledge(admin, { recordIds = [], categoryIds = [], entryIds = [] } = {}) {
+export async function deleteKnowledge(admin, { recordIds = [], categoryIds = [], entryIds = [] } = {}, {
+  // force:true: this is a deliberate teardown, so skip the SDK's default in-use guard.
+  deleteRecord = (id) => kaltura.knowledge.deleteRecord(id, admin, { confirmPermanent: true, force: true }),
+  multirequest = (calls) => ovpMultirequest(admin, calls), log = console.error,
+} = {}) {
+  const failures = [];
   for (const recordId of recordIds) {
-    // force:true: this is a deliberate teardown, so skip the SDK's default in-use guard.
-    await kaltura.knowledge.deleteRecord(recordId, admin, { confirmPermanent: true, force: true }).catch((e) => console.error('knowledge-record', recordId, e.code));
+    await deleteRecord(recordId).catch((e) => failures.push({ kind: 'record', id: recordId, code: e.code || e.message }));
   }
   if (categoryIds.length) {
     const calls = entryIds.map((entryId) => ({ service: 'baseentry', action: 'delete', entryId }));
     for (const id of categoryIds) calls.push({ service: 'category', action: 'delete', id });
-    const body = { apiVersion: '19.14.0', format: 1 };
-    calls.forEach((c, i) => { body[i] = { ks: admin.ks, ...c }; });
     try {
-      await fetch(`${OVP_BASE}/service/multirequest`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
-    } catch (e) { console.error('knowledge-category', categoryIds.join(','), e.message); }
+      failures.push(...multirequestFailures(calls, await multirequest(calls)));
+    } catch (e) { failures.push({ kind: 'batch', id: `${entryIds.length} entries, categories ${categoryIds.join(',')}`, code: e.message }); }
   }
+  if (failures.length) log(`⚠ ${summarizeDeleteFailures(failures)}`);
+  return failures;
+}
+
+/** Why the live corpus is not a confirmed, fully indexed one, or null when it is. `live` is
+ * discoverKnowledge's result and `tally` is pollEntryStatus's. A docs hash is stored only after a
+ * deploy confirmed indexing, so a missing hash means the last deploy did not. */
+export function knowledgeProblem(live, tally) {
+  if (!live?.recordIds.length) return 'the intellect links no knowledge record';
+  if (!live.docsHash) return 'the knowledge category has no docs hash, so the last deploy did not confirm indexing';
+  return indexProblem(tally);
+}
+
+/** `--verify-knowledge`: read-only. Throws unless the intellect in server/agent.json links a
+ * corpus that a deploy confirmed and whose entries are all indexed right now. */
+async function verifyKnowledge() {
+  const saved = JSON.parse(await readFile(OUT, 'utf8').catch(() => '{}'));
+  if (!saved.configId) throw new Error('server/agent.json has no configId to verify');
+  const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision' });
+  const live = await discoverKnowledge(admin, Number(saved.configId));
+  const tally = live?.recordIds.length ? await pollEntryStatus(admin, live.recordIds[0], live.entryIds, 0) : null;
+  const problem = knowledgeProblem(live, tally);
+  if (problem) throw new Error(`knowledge base not ready: ${problem}. Run Redeploy Nova with rebuild ticked.`);
+  console.log(`✓ knowledge base ready: ${live.entryIds.length} entries indexed`);
 }
 
 const CLEANUP_TARGETS = ['agent', 'avatar', 'intellect', 'knowledge'];
@@ -1102,7 +1271,8 @@ async function cleanup(opts = {}) {
     if (dryRun) {
       log(`knowledge-of-intellect:${saved.configId}`);
     } else if (knowledge) {
-      await deleteKnowledge(admin, knowledge);
+      const failures = await deleteKnowledge(admin, knowledge);
+      if (failures.some((f) => f.kind !== 'record')) process.exitCode = 1;
       knowledge.recordIds.forEach((id) => log(`knowledge-record:${id}`));
       knowledge.categoryIds.forEach((id) => log(`knowledge-category:${id}`));
       log(`knowledge-entries:${knowledge.entryIds.length}`);
@@ -1125,6 +1295,8 @@ const USAGE = `Usage: node server/provision.mjs [options]
   --agent-id <existingAgentId>          Update this agent in place, keep its widgetId
   --rebuild                             With --reuse: build a new knowledge corpus even if the
                                          docs hash is unchanged
+  --verify-knowledge                    Read-only: exit non-zero unless the intellect in
+                                         server/agent.json links a fully indexed corpus
   --cleanup                             Delete the agent/avatar/intellect recorded in
                                          server/agent.json plus the knowledge corpus the
                                          intellect links (discovered live, not from the file)
@@ -1134,7 +1306,7 @@ const USAGE = `Usage: node server/provision.mjs [options]
                                          of ${CLEANUP_TARGETS.join(',')}
   --help                                Show this message and exit (no API calls made)`;
 
-const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--cleanup', '--dry-run', '--only', '--help'];
+const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--verify-knowledge', '--cleanup', '--dry-run', '--only', '--help'];
 
 function main() {
   const args = stripSiteDirFlag(process.argv.slice(2));
@@ -1144,6 +1316,7 @@ function main() {
     console.error(`✗ unknown flag(s): ${unknown.join(', ')}\n\n${USAGE}`);
     process.exit(1);
   }
+  if (args.includes('--verify-knowledge')) return verifyKnowledge();
   if (!args.includes('--cleanup')) {
     if (args.includes('--dry-run') || args.includes('--only')) {
       console.error(`✗ --dry-run/--only only apply with --cleanup\n\n${USAGE}`);

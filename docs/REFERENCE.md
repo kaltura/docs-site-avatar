@@ -58,6 +58,7 @@
 | `--avatar-id <existingAvatarId>` | Skip the preset pick, use this avatar as-is |
 | `--agent-id <existingAgentId>` | Update this agent in place, keeping its `widgetId` |
 | `--rebuild` | With `--reuse`: build a new knowledge corpus even if the docs hash is unchanged. The old one is deleted only after the intellect points at the new one |
+| `--verify-knowledge` | Read-only. Exit non-zero unless the live corpus has a stored docs hash and every entry is indexed. Used by `eval.yml` |
 | `--cleanup` | Delete the agent/avatar/intellect recorded in `server/agent.json` plus the knowledge corpus the intellect links (discovered live) |
 | `--dry-run` | With `--cleanup`: list what would be deleted, make no API calls |
 | `--only <types>` | With `--cleanup`: limit to a comma-separated subset of `agent,avatar,intellect,knowledge` |
@@ -98,7 +99,7 @@ See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why these are shaped this way, a
 
 | Workflow | Trigger | Gate | Secrets read from |
 |---|---|---|---|
-| `redeploy.yml` | Push to `server/provision.mjs` on `main`; `workflow_dispatch` | `production` environment, required reviewers | `production` environment secrets |
+| `redeploy.yml` | Push to `server/provision.mjs` on `main`; nightly `schedule`; `repository_dispatch` (`site-updated`); `workflow_dispatch` | `production` environment, required reviewers | `production` environment secrets |
 | `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` with a `trials` input | `production` environment, required reviewers (a `workflow_run` trigger queues the eval; it runs after approval) | `production` environment secrets |
 
 Both need `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET` defined in whichever secrets scope they read from — see HOW-TO.md's "Set up this repo's CI secrets."

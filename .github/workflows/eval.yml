@@ -40,6 +40,12 @@ jobs:
 
       - run: npm ci
 
+      - name: Check the knowledge base is fully indexed
+        env:
+          AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
+          AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
+        run: node server/provision.mjs --verify-knowledge
+
       - name: Run the eval against the live agent
         env:
           AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}

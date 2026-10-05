@@ -21,3 +21,10 @@ test('redeploy.yml: no cross-repo token or secret beyond the two production secr
   const secrets = [...redeploy.matchAll(/secrets\.(\w+)/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(secrets)].sort(), ['AGENTIC_ADMIN_SECRET', 'AGENTIC_PARTNER_ID']);
 });
+
+test('eval.yml: verifies the knowledge base before the eval runs', () => {
+  const verify = evalWf.indexOf('server/provision.mjs --verify-knowledge');
+  const run = evalWf.indexOf('node tests/eval/run.mjs');
+  assert.ok(verify > 0, 'verify step present');
+  assert.ok(verify < run, 'verify step runs first');
+});

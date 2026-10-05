@@ -14,9 +14,17 @@ Take `<configId>` and `<agentId>` from your existing `server/agent.json`. Add `-
 
 ## Redeploy Nova via GitHub Actions
 
-Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` on `main`. Either way, the job waits for a required reviewer on the `production` environment before it runs `provision.mjs --reuse` against the ids in `server/agent.json`. The knowledge corpus is discovered live from the intellect and re-uploaded only when the docs changed (tick **rebuild** to force it), so the job commits nothing back and fails if `server/agent.json` drifted. See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why the environment gate exists and why the docs site's own deploy doesn't trigger this automatically.
+Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` on `main`. The workflow also runs nightly and on a `repository_dispatch` of type `site-updated`. Every trigger waits for a required reviewer on the `production` environment before it runs `provision.mjs --reuse` against the ids in `server/agent.json`. The knowledge corpus is discovered live from the intellect and re-uploaded only when the docs changed (tick **rebuild** to force it), so the job commits nothing back and fails if `server/agent.json` drifted. See [docs/ARCHITECTURE.md](ARCHITECTURE.md) for why the environment gate exists and why the docs site's own deploy doesn't trigger this automatically.
 
-Approve the pending deployment from the run's page (or the notification GitHub sends the reviewers) — the run stays queued until someone does.
+Approve the pending deployment from the run's page (or the notification GitHub sends the reviewers) — the run stays queued until someone does. This applies to the nightly run too.
+
+To check the live knowledge base without deploying:
+
+```bash
+node server/provision.mjs --verify-knowledge
+```
+
+It is read-only. It exits non-zero unless the last deploy confirmed every entry indexed and every entry is indexed now. `eval.yml` runs it first.
 
 ## Run the eval suite in CI
 
@@ -43,7 +51,7 @@ node server/provision.mjs --site-dir /path/to/checkout
 node tests/eval/run.mjs --site-dir /path/to/checkout
 ```
 
-Or set `SITE_REPO_DIR` in `.env` once instead of passing `--site-dir` every time — both `provision.mjs` and the eval suite read the same resolution order (flag, then `SITE_REPO_DIR`, then a hardcoded local default). The checkout must have `src/index.md` and `src/_data/nav.js`, or resolution fails with a clear error naming the path it tried. `provision.mjs` then reads one markdown file per page in the sections manifest (`nova/sections.json`, fetched from the live site or passed with `--sections-file`), so the checkout must be the one the published manifest was built from, or it fails naming the missing file.
+Or set `SITE_REPO_DIR` in `.env` once instead of passing `--site-dir` every time — both `provision.mjs` and the eval suite read the same resolution order (flag, then `SITE_REPO_DIR`, then a hardcoded local default). The checkout must have `src/index.md` and `src/_data/nav.js`, or resolution fails with a clear error naming the path it tried. `provision.mjs` then reads one markdown file per page in the sections manifest (`nova/sections.json`, fetched from the live site or passed with `--sections-file`), so the checkout must be the one the published manifest was built from. If the manifest and the checkout list different pages, `provision.mjs` fails before any upload and names the pages missing on each side.
 
 ## Tear down live resources
 

@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // provision.mjs gates on these at module load (see the top-level `if
 // (!partnerId || !adminSecret) process.exit(2)`) — set dummies before
@@ -13,6 +16,8 @@ const {
   buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, OPENING_INTRO, NOVA_GREET_VAR, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
+  chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry, indexProblem, storeHashIfIndexed,
+  multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 const { SILENT_OPENING, isSilentOpening } = await import('../../vendor/sdk/src/management/index.js');
@@ -646,4 +651,159 @@ test('withRollback: a failing undo is logged and never hides the original error'
     (e) => e === boom,
   );
   assert.deepEqual(logs, ['rollback failed: server_error']);
+});
+
+/* K3: the chunk version is derived from the chunker, not bumped by hand. */
+test('chunkFormat: CHUNK_FORMAT is a readable version derived from the chunker output', () => {
+  assert.match(CHUNK_FORMAT, /^chunks-[0-9a-f]{12}$/);
+  assert.equal(chunkFormat(), CHUNK_FORMAT);
+});
+
+test('chunkFormat: any change to what the chunker emits changes the version', () => {
+  assert.notEqual(chunkFormat((md, doc, page) => splitIntoSections(md, doc, page).map((c) => c.replace('Part of section', 'Section'))), CHUNK_FORMAT);
+  assert.notEqual(chunkFormat((md, doc, page) => splitIntoSections(md, doc, page).slice(1)), CHUNK_FORMAT);
+});
+
+test('chunkFormat: the fixed sample reaches the chunker branches a hand bump used to cover', () => {
+  let chunks;
+  chunkFormat((md, doc, page) => (chunks = splitIntoSections(md, doc, page)));
+  const text = chunks.join('\n');
+  assert.ok(text.includes('Part of section: Beta'), 'oversized ## section split at ###');
+  assert.ok(text.includes('go_to arguments for "Table one"'), 'target wrapper rewritten');
+  assert.ok(!text.includes('data-nova-target') && !text.includes('(#alpha)') && !text.includes('(/other/'), 'markup and links reduced');
+  assert.ok(chunks.some((c) => c.startsWith('# Sample\n') && c.includes('### Intro one')), 'oversized intro keeps its first sub-chunk');
+  assert.ok(chunks.some((c) => c.includes('### Intro two') && c.includes('go_to arguments')), 'oversized intro split at ###');
+  assert.ok(!chunks.some((c) => c.startsWith('## Not a heading')), 'a fenced ## never starts a chunk');
+  assert.ok(chunks.some((c) => c.includes('## Delta')), 'closing-hash heading kept');
+});
+
+/* K4: the manifest and the checkout must list the same pages. */
+async function siteFixture(files) {
+  const dir = await mkdtemp(join(tmpdir(), 'nova-site-'));
+  for (const [rel, body] of Object.entries(files)) {
+    await mkdir(join(dir, 'src', rel, '..'), { recursive: true });
+    await writeFile(join(dir, 'src', rel), body);
+  }
+  return dir;
+}
+const docsFor = (...urls) => urls.map((url) => ({ url, file: fileForUrl(url), title: '' }));
+
+test('findDocMismatch: names pages only in the manifest and files only in the checkout', () => {
+  const r = findDocMismatch(docsFor('/', '/guides/a/', '/guides/gone/'), ['index.md', 'guides/a.md', 'guides/new.md']);
+  assert.deepEqual(r, { missingSource: ['/guides/gone/'], unpublished: ['guides/new.md'] });
+  assert.deepEqual(findDocMismatch(docsFor('/'), ['index.md']), { missingSource: [], unpublished: [] });
+});
+
+test('loadDocContent: a page missing on either side fails up front and names every page', async () => {
+  const dir = await siteFixture({ 'index.md': '# Home', 'guides/new.md': '# New', '_includes/partial.md': '# skip', '_data/nav.js': '' });
+  await assert.rejects(loadDocContent(dir, docsFor('/', '/guides/gone/')), (e) => {
+    assert.match(e.message, /In the manifest only: \/guides\/gone\//);
+    assert.match(e.message, /In the checkout only: guides\/new\.md/);
+    assert.ok(!e.message.includes('partial.md'), 'include folders are not pages');
+    return true;
+  });
+});
+
+test('loadDocContent: matching pages load with their front matter stripped', async () => {
+  const dir = await siteFixture({ 'index.md': '---\ntitle: Home\n---\n# Home', 'guides/a.md': '# A' });
+  const docs = docsFor('/', '/guides/a/');
+  await loadDocContent(dir, docs);
+  assert.deepEqual(docs.map((d) => d.markdown), ['# Home', '# A']);
+});
+
+/* K6: transient upload failures are retried with backoff. */
+test('isTransientError: 5xx, 429 and a missing HTTP response retry; client and OVP errors do not', () => {
+  for (const e of [{ status: 503 }, { status: 500, code: 'server_error' }, { status: 429 }, { code: 'server_error' }, new TypeError('fetch failed')]) assert.equal(isTransientError(e), true, JSON.stringify(e));
+  for (const e of [{ status: 400, code: 'bad_request' }, { status: 403 }, { code: 'ovp_error' }]) assert.equal(isTransientError(e), false, JSON.stringify(e));
+});
+
+test('withRetry: retries a transient failure with doubling backoff and logs each retry', async () => {
+  const waits = [];
+  const logs = [];
+  let n = 0;
+  const r = await withRetry(async () => { if (++n < 3) throw Object.assign(new Error('x'), { status: 502, code: 'server_error' }); return 'ok'; },
+    { label: 'upload a.md', wait: async (ms) => waits.push(ms), log: (m) => logs.push(m) });
+  assert.equal(r, 'ok');
+  assert.deepEqual(waits, [2000, 4000]);
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /upload a\.md failed \(server_error\), retry 1\/3 in 2s/);
+});
+
+test('withRetry: a non-transient error is not retried, and the last error surfaces once attempts run out', async () => {
+  let n = 0;
+  await assert.rejects(withRetry(async () => { n++; throw Object.assign(new Error('bad'), { status: 400 }); }, { wait: async () => {}, log: () => {} }), /bad/);
+  assert.equal(n, 1);
+  n = 0;
+  await assert.rejects(withRetry(async () => { n++; throw Object.assign(new Error(`down ${n}`), { status: 503 }); }, { attempts: 3, wait: async () => {}, log: () => {} }), /down 3/);
+  assert.equal(n, 3);
+});
+
+/* K2: the docs hash is stored only after the poll confirms every entry. */
+test('indexProblem: null only when nothing is failed or pending', () => {
+  assert.equal(indexProblem({ indexed: 2, failed: [], pending: [] }), null);
+  assert.equal(indexProblem({ indexed: 1, failed: ['a'], pending: [] }), '1 with an error status');
+  assert.equal(indexProblem({ indexed: 0, failed: ['a'], pending: ['b', 'c'] }), '1 with an error status, 2 not confirmed indexed');
+});
+
+test('storeHashIfIndexed: the hash is written on a clean poll and never on a timeout or an error entry', async () => {
+  let stored = 0;
+  const store = async () => { stored++; };
+  assert.equal(await storeHashIfIndexed({ failed: [], pending: ['a'] }, store), '1 not confirmed indexed');
+  assert.equal(await storeHashIfIndexed({ failed: ['a'], pending: [] }, store), '1 with an error status');
+  assert.equal(stored, 0);
+  assert.equal(await storeHashIfIndexed({ failed: [], pending: [] }, store), null);
+  assert.equal(stored, 1);
+});
+
+/* K5: delete results are read, failures reported. */
+const delCalls = [
+  { service: 'baseentry', action: 'delete', entryId: 'e1' },
+  { service: 'baseentry', action: 'delete', entryId: 'e2' },
+  { service: 'category', action: 'delete', id: 7 },
+];
+const apiError = (code) => ({ objectType: 'KalturaAPIException', code, message: code });
+
+test('multirequestFailures: reads each result; an exception inside HTTP 200 is a failure, not-found is already deleted', () => {
+  assert.deepEqual(multirequestFailures(delCalls, [{}, apiError('ENTRY_ID_NOT_FOUND'), apiError('CATEGORY_LOCKED')]), [{ kind: 'category', id: 7, code: 'CATEGORY_LOCKED' }]);
+  assert.deepEqual(multirequestFailures(delCalls, [apiError('ENTRY_LOCKED'), {}, {}]), [{ kind: 'entry', id: 'e1', code: 'ENTRY_LOCKED' }]);
+  assert.deepEqual(multirequestFailures(delCalls, [{}, {}]), [{ kind: 'category', id: 7, code: 'NO_RESULT' }], 'a missing result is a failure');
+});
+
+test('deleteKnowledge: returns and logs every failed delete, including per-call errors in a 200 response', async () => {
+  const logs = [];
+  const failures = await deleteKnowledge('ks', { recordIds: [11], categoryIds: [7], entryIds: ['e1', 'e2'] }, {
+    deleteRecord: async () => { throw Object.assign(new Error('boom'), { code: 'server_error' }); },
+    multirequest: async () => [apiError('ENTRY_LOCKED'), {}, {}],
+    log: (m) => logs.push(m),
+  });
+  assert.deepEqual(failures, [{ kind: 'record', id: 11, code: 'server_error' }, { kind: 'entry', id: 'e1', code: 'ENTRY_LOCKED' }]);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /2 knowledge delete\(s\) failed: record 11: server_error; entry e1: ENTRY_LOCKED/);
+});
+
+test('deleteKnowledge: a failed multirequest is one batch failure; a clean delete returns nothing and logs nothing', async () => {
+  const logs = [];
+  const failed = await deleteKnowledge('ks', { categoryIds: [7], entryIds: ['e1'] }, { multirequest: async () => { throw new Error('multirequest HTTP 502'); }, log: (m) => logs.push(m) });
+  assert.deepEqual(failed, [{ kind: 'batch', id: '1 entries, categories 7', code: 'multirequest HTTP 502' }]);
+  const clean = await deleteKnowledge('ks', { recordIds: [1], categoryIds: [7], entryIds: ['e1'] }, { deleteRecord: async () => {}, multirequest: async (calls) => calls.map(() => ({})), log: (m) => logs.push(m) });
+  assert.deepEqual(clean, []);
+  assert.equal(logs.length, 1);
+});
+
+test('summarizeDeleteFailures: names the first few and counts the rest', () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ kind: 'entry', id: `e${i}`, code: 'X' }));
+  const line = summarizeDeleteFailures(many);
+  assert.match(line, /^12 knowledge delete\(s\) failed: entry e0: X;/);
+  assert.match(line, /and 2 more$/);
+  assert.ok(!line.includes('e11'));
+});
+
+/* K7: the eval entry point checks the live corpus. */
+test('knowledgeProblem: a corpus passes only when a deploy confirmed it and every entry is indexed now', () => {
+  const live = { recordIds: [1], categoryIds: [2], entryIds: ['a'], docsHash: 'abc' };
+  const clean = { failed: [], pending: [] };
+  assert.equal(knowledgeProblem(live, clean), null);
+  assert.match(knowledgeProblem(null, null), /links no knowledge record/);
+  assert.match(knowledgeProblem({ ...live, docsHash: null }, clean), /no docs hash/);
+  assert.equal(knowledgeProblem(live, { failed: [], pending: ['a'] }), '1 not confirmed indexed');
 });
