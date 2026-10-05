@@ -492,16 +492,28 @@ export function buildPersonas(siteData) {
     },
     {
       // The continued-thread branch of the kickoff rule: a chat-first kickoff that lands on a
-      // thread which already has history (a session that reopens a saved `threadId`). The
+      // thread which already has history. The
       // engine's warmup already sent this thread's FIRST kickoff, so the trigger turn below is the repeated,
-      // mid-thread one — Nova must greet back briefly (resumeKickoff probe), never rerun her
-      // full first-visit self-introduction as if the visitor were new.
+      // mid-thread one — Nova must invite the next question briefly (resumeKickoff probe), never
+      // rerun her full first-visit self-introduction and never claim to remember the visitor.
       id: 'resume-kickoff',
       category: 'lifecycle',
       persona: 'Continued thread: the chat-first greeting kickoff arrives again on a thread that already has history',
       turns: [
         { prompt: 'What are the two main entry points of this SDK?', relevanceAny: ['management', 'experience'] },
         { prompt: KICKOFF_TRIGGER, isResumeKickoff: true, skipCompleteness: true, forbidTools: ['go_to'] },
+      ],
+    },
+    {
+      // Nova keeps no state between visits. Asked whether she remembers the visitor, she says she
+      // starts fresh each visit and never claims a memory (freshStart probe). No warmup: the
+      // question is the thread's first message, like a real new visit.
+      id: 'fresh-start',
+      category: 'lifecycle',
+      skipWarmup: true,
+      persona: 'Visitor who asks whether Nova remembers them from a previous visit',
+      turns: [
+        { prompt: 'Do you remember me from last time?', expectFreshStart: true, forbidTools: ['go_to'], skipCompleteness: true },
       ],
     },
     {
