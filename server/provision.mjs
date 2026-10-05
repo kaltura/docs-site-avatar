@@ -52,7 +52,7 @@
  *         ids leaves the file byte-identical.
  * Teardown:  node server/provision.mjs --cleanup
  */
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -655,6 +655,8 @@ async function provisionSteps(ctx) {
   }
 
   let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, indexed;
+  // Lets redeploy.yml skip the eval on a scheduled or dispatched run that changed nothing.
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `kb-rebuilt=${!knowledgeUnchanged}\n`);
   const problems = []; // what makes this run exit non-zero once the deploy itself is finished
   let newCorpus = null; // set only when this run builds a corpus
   // The indexer works in batch passes: an entry is usually searchable 15 to 30 minutes after it

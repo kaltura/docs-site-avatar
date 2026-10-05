@@ -58,6 +58,7 @@ jobs:
           echo "avatar-id=$(node -pe "JSON.parse(require('fs').readFileSync('server/agent.json')).avatarId")" >> "$GITHUB_OUTPUT"
 
       - name: Redeploy in place
+        id: redeploy
         env:
           AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
           AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
@@ -69,6 +70,24 @@ jobs:
             --avatar-id "${{ steps.ids.outputs.avatar-id }}" \
             --site-dir ./site \
             ${REBUILD_FLAG}
+
+      - name: Record whether the eval is needed
+        env:
+          KB_REBUILT: ${{ steps.redeploy.outputs.kb-rebuilt }}
+        run: |
+          # A push to provision.mjs or a manual run can change the prompt, so it always needs the
+          # eval. A nightly or site-updated run needs it only when the knowledge base was rebuilt.
+          needed=true
+          case "${{ github.event_name }}" in
+            schedule|repository_dispatch) [ "$KB_REBUILT" = "true" ] || needed=false ;;
+          esac
+          echo "$needed" > eval-needed.txt
+          echo "eval needed: $needed"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: eval-needed
+          path: eval-needed.txt
 
       - name: Confirm server/agent.json is unchanged
         run: |

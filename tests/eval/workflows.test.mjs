@@ -28,3 +28,12 @@ test('eval.yml: verifies the knowledge base before the eval runs', () => {
   assert.ok(verify > 0, 'verify step present');
   assert.ok(verify < run, 'verify step runs first');
 });
+
+test('nightly and dispatched redeploys skip the eval when the knowledge base was not rebuilt', () => {
+  assert.match(redeploy, /schedule\|repository_dispatch\) \[ "\$KB_REBUILT" = "true" \] \|\| needed=false/);
+  assert.match(redeploy, /name: eval-needed/);
+  // The gate has no environment, so a skipped eval needs no approval; the eval job waits on it.
+  const gate = evalWf.slice(evalWf.indexOf('  gate:'), evalWf.indexOf('  eval:'));
+  assert.doesNotMatch(gate, /environment:/);
+  assert.match(evalWf, /needs: gate\n\s+if: \$\{\{ needs\.gate\.outputs\.run == 'true' \}\}/);
+});

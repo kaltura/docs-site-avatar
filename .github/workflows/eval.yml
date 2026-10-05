@@ -15,8 +15,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  eval:
+  # No environment, so a skipped eval never waits for a production approval.
+  gate:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-26.04
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/download-artifact@v8
+        if: ${{ github.event_name == 'workflow_run' }}
+        with:
+          name: eval-needed
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - id: decide
+        run: |
+          run=true
+          if [ "${{ github.event_name }}" = "workflow_run" ] && [ "$(cat eval-needed.txt)" != "true" ]; then run=false; fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "run eval: $run"
+
+  eval:
+    needs: gate
+    if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     environment: production
