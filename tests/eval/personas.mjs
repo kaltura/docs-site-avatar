@@ -428,6 +428,28 @@ export function buildPersonas(siteData) {
       ],
     },
     {
+      // The newcomer who asked, in non-technical words, how to "train" Claude Code on the SDK.
+      // Nova used to lecture on knowledge records and RAG. She must name the plugin, send them to
+      // the Build with coding agents guide, and stay off the knowledge-base jargon.
+      id: 'coding-agent-newbie',
+      category: 'positioning',
+      persona: 'Newcomer who wants Claude Code to build with this SDK and asks how to train it, in non-technical words',
+      turns: [
+        {
+          prompt: 'Hi, how do I train Claude Code on your SDK so it can build me an avatar app?',
+          expectTools: ['go_to'],
+          expectNavPath: '/guides/build-with-coding-agents/',
+          relevanceAny: ['plugin', 'skill', 'llms.txt'],
+          relevanceNone: ['knowledge record', 'intellect', 'rag'],
+        },
+        {
+          prompt: 'What commands do I run to install it?',
+          relevanceAny: ['/plugin marketplace add', 'kaltura-app-builder'],
+          relevanceNone: ['knowledge record', 'rag'],
+        },
+      ],
+    },
+    {
       // Chat mode (the site's text-only path) runs the SDK's real KalturaChatSession instead of
       // the raw converse stream — see chat-transport.mjs. Same brain, same tool, different client
       // stack: this persona proves page and section go_to calls plus KB answers all arrive through
