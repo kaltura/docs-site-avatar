@@ -21,7 +21,7 @@ Nothing is mocked. The harness drives the same provisioned brain the public site
 
 ## Coverage
 
-25 adversarial personas across 8 categories. Every turn is scored on every applicable dimension:
+26 adversarial personas across 8 categories. Every turn is scored on every applicable dimension:
 
 | Category | Personas | What it stresses |
 |---|---|---|
@@ -29,7 +29,7 @@ Nothing is mocked. The harness drives the same provisioned brain the public site
 | Navigation | `site-navigator-1..N` (every manifest page, in tours of at most 8 turns so one bad first turn can't poison a whole tour), `section-navigator`, `nonexistent-pages`, `single-nav-discipline` | Every real page reachable, no invented routes, one nav call per turn, no narration of what the screen is doing; section-level `go_to` calls land on a real section key of the targeted page, judged with the SDK's own `resolveTarget` |
 | Knowledge | `facts-and-scope`, `knowledge-depth`, `release-delta-depth`, `personalization-and-threads-depth` | Answers grounded in the site's own pages, knowledge-base retrieval depth |
 | Continuity | `thread-continuity`, `role-adherence-drift`, `transport-switch-continuity` | Multi-turn memory, staying in persona under pressure, and the same thread surviving a mid-conversation chat↔stream transport switch |
-| Positioning | `byo-brain-evaluator` | The "we have our own AI brain, just give us the talking head" conversation lands on the three-flows value story |
+| Positioning | `byo-brain-evaluator`, `coding-agent-newbie` | The "we have our own AI brain, just give us the talking head" conversation lands on the three-flows value story; "train Claude Code on your SDK" lands on the plugin and the Build with coding agents guide, not on knowledge-base jargon |
 | Lifecycle | `kickoff`, `resume-kickoff`, `pill-first` | The chat-first greeting kickoff gets a warm self-introduction, never an echo; a repeated kickoff on a thread with history gets a brief welcome-back, not a full reintroduction; a pill question sent as the first message gets an answer, not a greeting |
 | Transport | `chat-mode-tools` | Nav and knowledge behavior hold when the turn runs through the real `KalturaChatSession` (the site's chat mode) instead of the raw stream |
 | Context | `page-context` | `setDynamicPrompt()` page context reaches the brain: it can list the current page's sections and navigate to one. Soft assertions only — the `allow_client_variables` gate can lag ~24h after a redeploy (see [GUIDELINES.md](../tests/eval/GUIDELINES.md#when-the-eval-finds-something)) |
