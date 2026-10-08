@@ -601,6 +601,14 @@ test('pollEntryStatus: a slow batch cannot push later batches past the deadline'
   assert.equal(r.pending.length, 250);
 });
 
+test('pollEntryStatus: a zero budget is one full status pass over every batch, not only the first', async () => {
+  const ids = Array.from({ length: 390 }, (_, i) => `e${i}`);
+  const h = pollHarness((batch) => ({ entries: batch.map((id) => row(id, 'SUCCEEDED')) }), { budgetMs: 0 });
+  const r = await h.run(ids);
+  assert.deepEqual(r, { indexed: 390, failed: [], pending: [] });
+  assert.deepEqual(h.calls.map((c) => c.ids.length), [100, 100, 100, 90]);
+});
+
 test('pollEntryStatus: entries that finish with an error status are named, counted as finished, and stop the wait', async () => {
   const h = pollHarness((ids) => ({ entries: ids.map((id) => row(id, id === 'bad' ? 'NO_CHAPTERS' : 'SUCCEEDED')) }));
   const r = await h.run(['ok', 'bad']);

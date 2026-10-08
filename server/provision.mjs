@@ -983,13 +983,14 @@ export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budget
 } = {}) {
   const startedAt = now();
   const deadline = startedAt + budgetMs;
+  const onePass = budgetMs <= 0; // a status check, not a wait: cover every batch once
   const pending = new Set(entryIds);
   const failed = new Map();
   let errors = 0;
   while (pending.size) {
     const ids = [...pending];
     try {
-      for (let i = 0; i < ids.length && (i === 0 || now() < deadline); i += ENTRY_STATUS_BATCH) {
+      for (let i = 0; i < ids.length && (i === 0 || onePass || now() < deadline); i += ENTRY_STATUS_BATCH) {
         const { entries = [] } = await fetchStatus(ids.slice(i, i + ENTRY_STATUS_BATCH));
         for (const row of entries) {
           const state = entryIndexState(row);
