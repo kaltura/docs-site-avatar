@@ -14,14 +14,14 @@ process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
 const {
   fileForUrl, stripFrontmatter, splitIntoSections, githubSlugify, SUBCHUNK_THRESHOLD,
   buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, OPENING_INTRO, NOVA_GREET_VAR, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
-  targetArgsLine, rewriteTargetMarkup,
+  targetArgsLine, rewriteTargetMarkup, SIGNUP_LINK_TOOL_NAME, signupLinkTool,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
   chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry, indexProblem, storeHashIfIndexed,
   multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 const { SILENT_OPENING, isSilentOpening } = await import('../../vendor/sdk/src/management/index.js');
-const { KICKOFF_TRIGGER: EVAL_KICKOFF_TRIGGER } = await import('./personas.mjs');
+const { KICKOFF_TRIGGER: EVAL_KICKOFF_TRIGGER, SIGNUP_LINK_TOOL } = await import('./personas.mjs');
 
 /* opening model: a Jinja opening_phrase. The scripted intro plays only when the site sends the
    greet flag on a brand-new thread; every other join renders the SDK's silent-opening marker. */
@@ -814,4 +814,17 @@ test('knowledgeProblem: a corpus passes only when a deploy confirmed it and ever
   assert.match(knowledgeProblem(null, null), /links no knowledge record/);
   assert.match(knowledgeProblem({ ...live, docsHash: null }, clean), /no docs hash/);
   assert.equal(knowledgeProblem(live, { failed: [], pending: ['a'] }), '1 not confirmed indexed');
+});
+
+/* sign-up link client tool (#196) */
+test('signup link tool: fire-and-forget client tool with no args, so the model cannot pick a URL', () => {
+  const t = signupLinkTool();
+  assert.equal(t.name, 'show_signup_link');
+  assert.equal(t.type, 'client');
+  assert.equal(t.wait_for_response, false);
+  assert.ok(!t.args || Object.keys(t.args).length === 0);
+  assert.ok(!/https?:\/\//.test(JSON.stringify(t)), 'no URL in the tool config');
+});
+test('signup link tool: the eval persona file uses the same tool name', () => {
+  assert.equal(SIGNUP_LINK_TOOL, SIGNUP_LINK_TOOL_NAME);
 });
