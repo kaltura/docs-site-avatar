@@ -757,6 +757,7 @@ test('accuracy: repo answer has the repo path and never claims an npm package', 
 test('accuracy: compliance answer names the BAA route, never claims certification or opens with Yes', () => {
   const t = knowledgeTurn('HIPAA or HITRUST certified');
   assert.equal(probeRelevance(t, 'The SDK maps its controls to HIPAA and HITRUST but is not certified. Kaltura offers a BAA: ask your Kaltura Account Manager.').pass, true);
+  assert.equal(probeRelevance(t, 'We do not claim it is HIPAA or HITRUST certified. Kaltura offers a BAA: ask your Kaltura Account Manager.').pass, true);
   for (const b of [
     'Yes, the SDK is HIPAA certified. Ask your Account Manager about a BAA.',
     'It is certified for HITRUST. Ask your Account Manager about the BAA.',

@@ -355,7 +355,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Is the SDK HIPAA or HITRUST certified? We would need a BAA.',
           relevanceAll: ['account manager|customer success', 'baa|business associate'],
-          relevanceNone: ['(?<!\\b(?:not|isn.t|aren.t|never|neither)\\s(?:\\w+\\s){0,2})\\bcertified\\b', '^\\s*yes\\b'],
+          relevanceNone: ['(?<!\\b(?:not|isn.t|aren.t|never|neither)\\s(?:\\w+\\s){0,8})\\bcertified\\b', '^\\s*yes\\b'],
         },
         {
           prompt: 'Which languages can the avatar speak?',
