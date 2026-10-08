@@ -59,7 +59,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   Management, SILENT_OPENING, buildIndexerObjects, findIntellectsReferencingTool,
-  goToTool, siteMapPrompt, SITE_NAV_RULES_PROMPT, SITE_NAV_TOOL_NAME, loadSectionsManifest, estimateTokens,
+  tools, goToTool, siteMapPrompt, SITE_NAV_RULES_PROMPT, SITE_NAV_TOOL_NAME, loadSectionsManifest, estimateTokens,
   validateSectionsManifest, resolvePath,
   lintPersonaIdentity, lintPrompts, PAGE_CONTEXT_PROMPT,
 } from '../vendor/sdk/src/management/index.js';
@@ -107,6 +107,18 @@ export const OPENING_PHRASE = `{%- if ${NOVA_GREET_VAR} and sys__is_new_thread -
 // harness (tests/eval/personas.mjs) sends to open a thread. The avatar
 // greeting is the Jinja opening above, not this trigger. The obeyRules
 // prompt below is keyed on this exact string. Keep all three in sync.
+/**
+ * Client tool for the "Is this free?" answer. No arguments on purpose: the page picks the sign-up
+ * URL, so the model can never send a visitor to an address it made up. Fire-and-forget like go_to.
+ */
+export const SIGNUP_LINK_TOOL_NAME = 'show_signup_link';
+export const signupLinkTool = () => tools.client({
+  name: SIGNUP_LINK_TOOL_NAME,
+  displayName: 'Show sign-up link',
+  description: 'Shows the visitor a sign-up link button on the page. Call it once, right after you answer whether the SDK is free to use. It takes no arguments. Never call it for a pricing, plan, discount or quote question.',
+  waitForResponse: false,
+});
+
 export const KICKOFF_TRIGGER = 'Session started. Greet the visitor.';
 
 const partnerId = process.env.AGENTIC_PARTNER_ID;
@@ -720,10 +732,12 @@ async function provisionSteps(ctx) {
   // wait_for_response:false) is byte-identical across every app that adopts it.
   const goToToolId = await upsertClientTool(admin, goToTool({ siteLabel: 'the @kaltura/intelligent-agents docs site' }), existingTools, reuseConfigId);
 
+  const signupLinkToolId = await upsertClientTool(admin, signupLinkTool(), existingTools, reuseConfigId);
+
   const intellectBody = {
     type: 'internal', status: 2,
     knowledge_ids: [knowledgeRecordId],
-    tool_ids: [goToToolId],
+    tool_ids: [goToToolId, signupLinkToolId],
     // Gate for per-message request_vars (setDynamicPrompt → page_context).
     // Server default is already true, but pin it: with the gate off, any turn
     // carrying request_vars fails SILENTLY as an empty reply (see KEY_FACTS).
@@ -750,7 +764,8 @@ async function provisionSteps(ctx) {
       prompt('keyFacts', "Compact ground-truth facts about the SDK — cite these verbatim, never round, guess, or improvise a variant. These are always true regardless of what any knowledge-base search turns up for the same question: check here FIRST, and never say you couldn't find an answer to something that's answered right here, even if a knowledge-base search call came back empty, thin, or inconclusive on the same turn.", KEY_FACTS),
       prompt('goal', 'Your success in this interaction is measured by how effectively you pursue and fulfill this core strategic goal:', 'Help every visitor leave understanding what this SDK does, whether it fits their use case, and exactly which doc page to read next for their specific need — Getting Started for a first integration, a How-to Guide for a concrete problem, Reference for exact API/wire details, or Explanation for the architectural why. Prefer pointing to one specific real page over trying to answer everything yourself from memory.'),
       prompt('obeyRules', 'Rules you must obey without exception:', [
-        `FIRST, before considering ANY tool call on ANY turn: check whether the visitor's message asks about pricing, cost, licensing, discounts, sales commitments, or account setup — in any form, including a follow-up like "how much cheaper would X be" or a cost angle bolted onto an otherwise technical question. If it does, the ENTIRE answer for that turn is one short spoken sentence saying that's outside what you can help with here, pointing them to their Kaltura account manager or Kaltura sales at sales@kaltura.com if they don't have one yet — never guess at a number or a sales commitment — with ZERO tool calls of any kind: no ${SITE_NAV_TOOL_NAME}, no knowledge-base search, nothing. There is no pricing page on this site, so never move the visitor anywhere while giving this refusal. This gate outranks every rule below it, including any rule that would otherwise tell you to call ${SITE_NAV_TOOL_NAME} for the non-pricing part of the same message: on a pricing turn you answer the pricing part with the refusal, offer to continue the technical part next turn, and call no tools. Only after confirming the message is NOT about pricing do the rules below apply.`,
+        `FIRST, before considering ANY tool call on ANY turn: check whether the visitor's message asks about pricing, cost, licensing, discounts, sales commitments, or account setup — in any form, including a follow-up like "how much cheaper would X be" or a cost angle bolted onto an otherwise technical question. If it does, and it is not the plain free-to-use question that the next rule handles, the ENTIRE answer for that turn is one short spoken sentence saying that's outside what you can help with here, pointing them to their Kaltura account manager or Kaltura sales at sales@kaltura.com if they don't have one yet — never guess at a number or a sales commitment — with ZERO tool calls of any kind: no ${SITE_NAV_TOOL_NAME}, no knowledge-base search, nothing. There is no pricing page on this site, so never move the visitor anywhere while giving this refusal. This gate outranks every rule below it, including any rule that would otherwise tell you to call ${SITE_NAV_TOOL_NAME} for the non-pricing part of the same message: on a pricing turn you answer the pricing part with the refusal, offer to continue the technical part next turn, and call no tools. Only after confirming the message is NOT about pricing do the rules below apply.`,
+        `The one exception to the pricing gate above: when the visitor asks whether the SDK itself is free to use, or what license it has, answer in one or two spoken sentences from the compact facts: the SDK is MIT licensed and free to read, fork and build on, and a Kaltura account with the Agentic Avatar feature enabled is needed to make live calls. Then call ${SIGNUP_LINK_TOOL_NAME} once, and end with a short invitation such as "You can sign up whenever you're ready." The call is fire-and-forget, so never describe the button or report that you showed it. Do not read any URL aloud, and do not call ${SITE_NAV_TOOL_NAME} on that turn. The exception never covers prices, plans, tiers, discounts, quotes, what the live service costs, or any other cost question: those keep the refusal above with zero tool calls, and ${SIGNUP_LINK_TOOL_NAME} is never called on them.`,
         'Only cite or link a page that appears in your SITE MAP above — never invent a URL, and never claim a capability, API, or file path that is not in your knowledge base.',
         `Only call ${SITE_NAV_TOOL_NAME} when one of the pages listed in your SITE MAP is actually ABOUT the thing being asked — not just adjacent, related, or "closest guess." If nothing in your SITE MAP is really about it (e.g. a question about yourself, about who to contact at Kaltura, about something this site doesn't document, or about a page that plain doesn't exist here, like a pricing table), answer in text and do NOT call ${SITE_NAV_TOOL_NAME} at all. Never construct, guess, or complete a URL yourself, including anything that looks like a plausible github.io/repo/docs address — even when the question is ABOUT the SDK's own package, repo, npm import, or GitHub presence (e.g. pinning a version, installing it, where its source lives), that is still a question about topics covered on THIS site, not an invitation to link to an external SDK/GitHub URL you're guessing at. The ONLY valid values for path are the exact strings written in your SITE MAP, copied verbatim, never assembled; the ONLY valid values for section are that same page's own section keys from the SITE MAP, copied verbatim. If none of them is really about it, just answer in text with no call.`,
         `How to fill in ${SITE_NAV_TOOL_NAME}'s arguments, every single time: first find the ONE line in your SITE MAP that starts with the exact path you intend to send. If no line starts with it, that page does not exist on this site, so do not call ${SITE_NAV_TOOL_NAME} at all: never build a path out of a topic name, a heading, a knowledge-base result, or a URL you remember, and never "correct" a listed path into a nicer-sounding one. The home page is the line right under the note that names it: every key on that line is a section of the home page, so anything from that line is sent with the path set to the single character "/" and the key as section, with no colon or anything else added to the path. For section, copy one key exactly as it is written on that same line, character for character, and only when the visitor's words clearly point at that key. When you are not certain which key on that line fits, or the name you have in mind is a heading, an anchor id, or a phrase from retrieved text rather than a key printed on that SITE MAP line, leave section out entirely and send the path alone: the page top is always a correct answer, an invented or reworded key never is.`,
