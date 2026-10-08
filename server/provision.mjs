@@ -46,8 +46,11 @@
  *                                             # hash is unchanged
  *       --verify-knowledge                    # read-only: exit non-zero unless the intellect in
  *                                             # server/agent.json links a fully indexed corpus
- *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag, ...any
- *         hand-recorded extra fields, carried forward as-is }, first backing up any
+ *       --digest-plan                         # read-only: show what --digest would create or update
+ *       --digest                              # create/update the conversation digest objects
+ *                                             # (server/digest.mjs) and record their ids
+ *       → writes server/agent.json { configId, avatarId, agentId, widgetId, tag, lifecycle },
+ *         carrying the `lifecycle` block forward as-is, first backing up any
  *         PREVIOUS agent.json to server/agent.json.bak. A --reuse run with the same
  *         ids leaves the file byte-identical.
  * Teardown:  node server/provision.mjs --cleanup
@@ -64,6 +67,7 @@ import {
   lintPersonaIdentity, lintPrompts, PAGE_CONTEXT_PROMPT,
 } from '../vendor/sdk/src/management/index.js';
 import { loadEnv } from '../load-env.mjs';
+import { ensureDigest } from './digest.mjs';
 import { resolveSiteDir, stripSiteDirFlag } from '../site-root.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -931,8 +935,8 @@ async function provisionSteps(ctx) {
 
   // Stable ids only. Everything about the knowledge corpus is discoverable from the intellect
   // (see discoverKnowledge), so a --reuse run with the same ids rewrites this file byte-for-byte.
-  // Any extra top-level field (e.g. lifecycle rule ids recorded by hand) isn't managed by this
-  // script — carry it forward from prevSaved instead of silently dropping it on every redeploy.
+  // The `lifecycle` block belongs to the digest step (server/digest.mjs, run with --digest):
+  // carry it forward from prevSaved instead of silently dropping it on every redeploy.
   const out = { ...prevSaved, configId, avatarId: avatar.id, agentId, widgetId, tag: TAG };
   const prevAgentJson = await readFile(OUT, 'utf8').catch(() => null);
   if (prevAgentJson !== null) await writeFile(`${OUT}.bak`, prevAgentJson);
@@ -1261,6 +1265,12 @@ async function verifyKnowledge() {
   console.log(`✓ knowledge base ready: ${live.entryIds.length} entries indexed`);
 }
 
+/** `--digest` / `--digest-plan`: bring Nova's conversation digest objects in line with server/digest.mjs. */
+async function digest({ apply }) {
+  const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision' });
+  await ensureDigest({ kaltura, admin, agentJsonPath: OUT, env: process.env, apply });
+}
+
 const CLEANUP_TARGETS = ['agent', 'avatar', 'intellect', 'knowledge'];
 
 /** @param {{dryRun?:boolean, only?:string[]}} [opts] */
@@ -1324,6 +1334,11 @@ const USAGE = `Usage: node server/provision.mjs [options]
                                          docs hash is unchanged
   --verify-knowledge                    Read-only: exit non-zero unless the intellect in
                                          server/agent.json links a fully indexed corpus
+  --digest-plan                         Read-only: list the conversation digest objects this
+                                         repo would create or update (names and ids only)
+  --digest                              Create or update the conversation digest objects
+                                         and record their ids in server/agent.json.
+                                         Needs DIGEST_RECIPIENTS (see docs/REFERENCE.md)
   --cleanup                             Delete the agent/avatar/intellect recorded in
                                          server/agent.json plus the knowledge corpus the
                                          intellect links (discovered live, not from the file)
@@ -1333,7 +1348,7 @@ const USAGE = `Usage: node server/provision.mjs [options]
                                          of ${CLEANUP_TARGETS.join(',')}
   --help                                Show this message and exit (no API calls made)`;
 
-const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--verify-knowledge', '--cleanup', '--dry-run', '--only', '--help'];
+const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--verify-knowledge', '--digest', '--digest-plan', '--cleanup', '--dry-run', '--only', '--help'];
 
 function main() {
   const args = stripSiteDirFlag(process.argv.slice(2));
@@ -1344,6 +1359,18 @@ function main() {
     process.exit(1);
   }
   if (args.includes('--verify-knowledge')) return verifyKnowledge();
+  if (args.includes('--digest') || args.includes('--digest-plan')) {
+    const others = args.filter((a) => a.startsWith('--') && a !== '--digest' && a !== '--digest-plan');
+    if (args.includes('--digest') && args.includes('--digest-plan')) {
+      console.error(`✗ pass --digest or --digest-plan, not both\n\n${USAGE}`);
+      process.exit(1);
+    }
+    if (others.length) {
+      console.error(`✗ --digest/--digest-plan run alone, not with ${others.join(', ')}\n\n${USAGE}`);
+      process.exit(1);
+    }
+    return digest({ apply: args.includes('--digest') });
+  }
   if (!args.includes('--cleanup')) {
     if (args.includes('--dry-run') || args.includes('--only')) {
       console.error(`✗ --dry-run/--only only apply with --cleanup\n\n${USAGE}`);

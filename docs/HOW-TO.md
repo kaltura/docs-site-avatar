@@ -26,6 +26,17 @@ node server/provision.mjs --verify-knowledge
 
 It is read-only. It exits non-zero unless the last deploy confirmed every entry indexed and every entry is indexed now. `eval.yml` runs it first.
 
+## Create or update the conversation digest
+
+Set `DIGEST_RECIPIENTS` in `.env` (comma-separated recipients of the digest email). Then preview the change and apply it:
+
+```bash
+node server/provision.mjs --digest-plan   # read-only: create / update / unchanged per object
+node server/provision.mjs --digest        # apply, then record the ids in server/agent.json
+```
+
+Run it again after any change to `server/digest.mjs` or `server/digest-email.html`, and after provisioning a new agent (the rules are scoped to the `agentId` in `server/agent.json`). Commit the `lifecycle` block if it changed. If the email template does not exist yet, also set `DIGEST_EMAIL_APP_GUID`. What the objects are is in [docs/ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Run the eval suite in CI
 
 `eval.yml` is queued automatically when `redeploy.yml` completes successfully (`workflow_run`). But it's scoped to the `production` environment just like `redeploy.yml` is, so "runs automatically" means "gets queued automatically" — it still waits for a required reviewer to approve the run (same page/notification as approving a redeploy) before it can read `AGENTIC_PARTNER_ID`/`AGENTIC_ADMIN_SECRET` and actually execute. To run it ad hoc — a pass^k reliability check without redeploying first, say — go to **Actions → Eval Nova → Run workflow** and set `trials`; that run needs the same approval. The report and the full `tests/eval/artifacts/` directory are attached to the run (job summary plus a 30-day build artifact), the same outputs a local `npm run eval` writes to disk.
