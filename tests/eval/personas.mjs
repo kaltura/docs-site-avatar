@@ -546,7 +546,7 @@ export function buildPersonas(siteData) {
         },
         {
           prompt: 'We want it because we already have our own knowledge base and customer memory, and the avatar should speak from those.',
-          relevanceAll: ['\\bmcp\\b|model context protocol', 'account (?:manager|rep)'],
+          relevanceAll: ['\\bmcp\\b|model context protocol'],
           relevanceAny: ['api', 'integration', 'tool'],
         },
         {

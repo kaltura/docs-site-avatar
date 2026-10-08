@@ -46,6 +46,9 @@ const REFUSAL_PHRASES = [
   'cannot help you with',
   'reach out to the kaltura team',
   'contact kaltura',
+  // seen live: "handled directly by our sales team ... I cannot provide a quote" — a hand-off with no figure.
+  'handled directly by our sales team',
+  'cannot provide a quote',
   "i'm not able to",
   "can't quote",
   "can't discuss pricing",
