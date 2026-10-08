@@ -313,7 +313,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Is there an event that fires shortly before my session token expires, so I can refresh it in time?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['settoken'],
+          relevanceAny: ['settoken', 'set token', 'set-token'],
           // The wrong answer invents an expiry or refresh event by name.
           relevanceNone: ['token(will)?expir\\w*', 'token(will)?refresh\\w*'],
         },
