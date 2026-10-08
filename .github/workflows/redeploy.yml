@@ -63,22 +63,26 @@ jobs:
           AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
           AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
           REBUILD_FLAG: ${{ inputs.rebuild && '--rebuild' || '' }}
+          CONFIG_ID: ${{ steps.ids.outputs.config-id }}
+          AGENT_ID: ${{ steps.ids.outputs.agent-id }}
+          AVATAR_ID: ${{ steps.ids.outputs.avatar-id }}
         run: |
           node server/provision.mjs \
-            --reuse "${{ steps.ids.outputs.config-id }}" \
-            --agent-id "${{ steps.ids.outputs.agent-id }}" \
-            --avatar-id "${{ steps.ids.outputs.avatar-id }}" \
+            --reuse "$CONFIG_ID" \
+            --agent-id "$AGENT_ID" \
+            --avatar-id "$AVATAR_ID" \
             --site-dir ./site \
             ${REBUILD_FLAG}
 
       - name: Record whether the eval is needed
         env:
           KB_REBUILT: ${{ steps.redeploy.outputs.kb-rebuilt }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           # A push to provision.mjs or a manual run can change the prompt, so it always needs the
           # eval. A nightly or site-updated run needs it only when the knowledge base was rebuilt.
           needed=true
-          case "${{ github.event_name }}" in
+          case "$EVENT_NAME" in
             schedule|repository_dispatch) [ "$KB_REBUILT" = "true" ] || needed=false ;;
           esac
           echo "$needed" > eval-needed.txt
@@ -102,12 +106,16 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          CONFIG_ID: ${{ steps.ids.outputs.config-id }}
+          AGENT_ID: ${{ steps.ids.outputs.agent-id }}
+          AVATAR_ID: ${{ steps.ids.outputs.avatar-id }}
         run: |
           {
             echo "### Redeploy summary"
-            echo "- configId: ${{ steps.ids.outputs.config-id }}"
-            echo "- agentId: ${{ steps.ids.outputs.agent-id }}"
-            echo "- avatarId: ${{ steps.ids.outputs.avatar-id }}"
+            echo "- configId: $CONFIG_ID"
+            echo "- agentId: $AGENT_ID"
+            echo "- avatarId: $AVATAR_ID"
             echo ""
             echo "provision.mjs discovers the intellect's current knowledge corpus live and compares"
             echo "the docs hash stored on its category with the docs in the site checkout. Same hash and"

@@ -37,3 +37,28 @@ test('nightly and dispatched redeploys skip the eval when the knowledge base was
   assert.doesNotMatch(gate, /environment:/);
   assert.match(evalWf, /needs: gate\n\s+if: \$\{\{ needs\.gate\.outputs\.run == 'true' \}\}/);
 });
+
+// A `${{ }}` expression inside a run: script is pasted into the shell text before it runs, which
+// is a script-injection risk. Pass the value through `env:` and read the shell variable instead.
+function runScriptExpressions(text) {
+  const lines = text.split('\n');
+  const found = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(\s*)(?:- )?run:\s*(.*)$/);
+    if (!m) continue;
+    const indent = m[1].length;
+    const parent = lines.slice(0, i).reverse().find((l) => l.trim() && l.match(/^\s*/)[0].length < indent);
+    if (/^\s*outputs:/.test(parent || '')) continue; // a job output that happens to be named run
+    const body = /^[|>]/.test(m[2]) ? [] : [m[2]];
+    while (i + 1 < lines.length && (lines[i + 1].trim() === '' || lines[i + 1].match(/^\s*/)[0].length > indent)) body.push(lines[++i]);
+    found.push(...body.filter((l) => l.includes('${{')).map((l) => l.trim()));
+  }
+  return found;
+}
+
+test('no workflow puts a ${{ }} expression inside a run: script', () => {
+  const files = ['ci.yml', 'eval.yml', 'redeploy.yml'];
+  for (const f of files) assert.deepEqual(runScriptExpressions(wf(f)), [], f);
+  assert.deepEqual(runScriptExpressions('steps:\n  - run: echo ${{ github.event_name }}'), ['echo ${{ github.event_name }}'], 'the check itself catches a one-line run');
+  assert.deepEqual(runScriptExpressions('steps:\n  - run: |\n      echo "${{ github.actor }}"\n  - run: echo ok'), ['echo "${{ github.actor }}"'], 'and a block run');
+});

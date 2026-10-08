@@ -32,9 +32,11 @@ jobs:
           github-token: ${{ github.token }}
 
       - id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           run=true
-          if [ "${{ github.event_name }}" = "workflow_run" ] && [ "$(cat eval-needed.txt)" != "true" ]; then run=false; fi
+          if [ "$EVENT_NAME" = "workflow_run" ] && [ "$(cat eval-needed.txt)" != "true" ]; then run=false; fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
           echo "run eval: $run"
 
