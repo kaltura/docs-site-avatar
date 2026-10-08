@@ -775,6 +775,7 @@ test('multirequestFailures: reads each result; an exception inside HTTP 200 is a
   assert.deepEqual(multirequestFailures(delCalls, [{}, apiError('ENTRY_ID_NOT_FOUND'), apiError('CATEGORY_LOCKED')]), [{ kind: 'category', id: 7, code: 'CATEGORY_LOCKED' }]);
   assert.deepEqual(multirequestFailures(delCalls, [apiError('ENTRY_LOCKED'), {}, {}]), [{ kind: 'entry', id: 'e1', code: 'ENTRY_LOCKED' }]);
   assert.deepEqual(multirequestFailures(delCalls, [{}, {}]), [{ kind: 'category', id: 7, code: 'NO_RESULT' }], 'a missing result is a failure');
+  assert.deepEqual(multirequestFailures(delCalls, [null, null, null]), [], 'a delete that worked returns null');
 });
 
 test('deleteKnowledge: returns and logs every failed delete, including per-call errors in a 200 response', async () => {
