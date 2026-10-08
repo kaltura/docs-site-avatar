@@ -176,6 +176,11 @@ test('noKbSearchWhenOff: not applicable when the turn opted use_knowledge_base o
 test('restrictedTopicRefusal: not applicable when unset', () => {
   assert.equal(probeRestrictedTopicRefusal({}, 'anything'), null);
 });
+test('restrictedTopicRefusal: "cannot make any sales commitments" with a rep hand-off passes', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    'I cannot make any sales commitments or promise discounts. I can connect you with a Kaltura sales representative.');
+  assert.equal(r.pass, true);
+});
 test('restrictedTopicRefusal: refusal phrase with no figure passes', () => {
   const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
     "That's not something I can help with — please reach out to Kaltura at corp.kaltura.com for pricing.");

@@ -40,6 +40,9 @@ const REFUSAL_PHRASES = [
   // seen live: "I cannot help with pricing or licensing questions" — the same "cannot" vs
   // "can't" gap already patched elsewhere in this list, hit again on a new verb phrase.
   'cannot help with',
+  // seen live: "I cannot make any sales commitments or promise discounts" with a hand-off to a sales rep.
+  'cannot make any sales commitments',
+  'cannot promise',
   // seen live: "I can't help you with pricing or licensing information here" — the same
   // phrase with an object pronoun inserted between "help" and "with".
   "can't help you with",
