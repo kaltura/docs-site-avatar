@@ -297,6 +297,13 @@ export function buildPersonas(siteData) {
           relevanceNone: ['onboarding', 'lead capture', 'text[- ]input'],
         },
         {
+          prompt: 'Is there an event that fires shortly before my session token expires, so I can refresh it in time?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['settoken'],
+          // The wrong answer invents an expiry or refresh event by name.
+          relevanceNone: ['token(will)?expir\\w*', 'token(will)?refresh\\w*'],
+        },
+        {
           prompt: 'Which session method sends the viewer’s structured form answers back to the brain, and does calling it make the avatar talk?',
           capabilities: { use_knowledge_base: 'on' },
           relevanceAny: ['submitstructureddataform', 'submit structured', 'setformleadinfo'],

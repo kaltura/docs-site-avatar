@@ -696,3 +696,12 @@ test('accuracy: form stages need start, middle, end and a thrown bad_request, wi
     'You can target start, middle and end, and the form validates its fields.',
   ]) assert.equal(probeRelevance(t, b).pass, false, b);
 });
+test('accuracy: token refresh names setToken and rejects an invented expiry event', () => {
+  const t = knowledgeTurn('shortly before my session token expires');
+  assert.equal(probeRelevance(t, 'No, there is no event before expiry. Mint a new token on your server and call setToken().').pass, true);
+  for (const b of [
+    'Yes, listen for the tokenWillExpire event, then call setToken() with a new token.',
+    'The session emits tokenExpiring about ten minutes before. Refresh with setToken().',
+    'Yes, there is an event for that. Listen for it and refresh.',
+  ]) assert.equal(probeRelevance(t, b).pass, false, b);
+});
