@@ -307,7 +307,8 @@ export function buildPersonas(siteData) {
           relevanceAny: ['bad_request', 'bad request', 'typed error', 'throws', 'rejects'],
           // A right answer names all three stages; invented ones ("onboarding", "lead capture") miss these.
           relevanceAll: ['\\bstart\\b', '\\bmiddle\\b', '\\bend\\b'],
-          relevanceNone: ['onboarding', 'lead capture', 'text[- ]input'],
+          // A runtime fallback to a text input is documented, so it is not a wrong answer.
+          relevanceNone: ['onboarding', 'lead capture'],
         },
         {
           prompt: 'Is there an event that fires shortly before my session token expires, so I can refresh it in time?',
