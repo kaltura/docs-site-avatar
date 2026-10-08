@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   toolNames, probeLatency, probeTools, probeCompleteness, probeRelevance,
   probeSingleToolCallPerTurn, probeNoKbSearchWhenOff, probeRestrictedTopicRefusal,
-  probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probePillAnswer, probeNoInventedUrl, probeNoInventedPath,
+  probeNoPromptLeak, probeKickoffHandling, probeResumeKickoff, probeFreshStart, probePillAnswer, probeNoInventedUrl, probeNoInventedPath,
   probeNavPathMatch, probeNoInventedApi, probeSectionResolvable, probeSectionMatch, probeNoScreenNarration, probeNoSplitPath,
   scoreTurn, DIMENSIONS, RELEASE_BLOCKING,
 } from './probes.mjs';
@@ -284,13 +284,18 @@ test('kickoffHandling: never introducing herself as Nova fails', () => {
 test('resumeKickoff: not applicable when unset', () => {
   assert.equal(probeResumeKickoff({}, "I'm Nova!"), null);
 });
-test('resumeKickoff: brief welcome-back naming the prior topic passes', () => {
-  const r = probeResumeKickoff({ isResumeKickoff: true }, 'Welcome back! We were talking about the SDK entry points — want to pick up from there?');
+test('resumeKickoff: one short invitation without a re-introduction passes', () => {
+  const r = probeResumeKickoff({ isResumeKickoff: true }, 'Go ahead and ask your next question about the SDK.');
   assert.equal(r.pass, true);
 });
 test('resumeKickoff: mentioning her own name without a full re-introduction passes', () => {
-  const r = probeResumeKickoff({ isResumeKickoff: true }, 'Good to see you again — Nova here, still happy to continue where we left off.');
+  const r = probeResumeKickoff({ isResumeKickoff: true }, 'Nova here, ask me anything else about the SDK.');
   assert.equal(r.pass, true);
+});
+test('resumeKickoff: a welcome-back or memory claim fails', () => {
+  const r = probeResumeKickoff({ isResumeKickoff: true }, 'Welcome back! Want to pick up where we left off?');
+  assert.equal(r.pass, false);
+  assert.equal(r.claimedMemory, true);
 });
 test('resumeKickoff: rerunning the full self-introduction fails', () => {
   const r = probeResumeKickoff({ isResumeKickoff: true }, "Hi there! I'm Nova, your guide to the intelligent agents SDK. What would you like to know?");
@@ -301,6 +306,29 @@ test('resumeKickoff: echoing the literal kickoff trigger fails', () => {
   const r = probeResumeKickoff({ isResumeKickoff: true }, 'You said "session started. greet the visitor" again.');
   assert.equal(r.pass, false);
   assert.equal(r.echoedTrigger, true);
+});
+
+/* fresh start ("do you remember me?") */
+test('freshStart: not applicable when unset', () => {
+  assert.equal(probeFreshStart({}, 'Welcome back!'), null);
+});
+test('freshStart: saying she starts fresh each visit passes', () => {
+  const r = probeFreshStart({ expectFreshStart: true }, 'I start fresh each visit, so I only know this conversation. What can I help you with?');
+  assert.equal(r.pass, true);
+});
+test('freshStart: a denial that repeats "last time" passes', () => {
+  const r = probeFreshStart({ expectFreshStart: true }, "I don't remember last time, since I have no memory of earlier visits.");
+  assert.equal(r.pass, true);
+});
+test('freshStart: claiming to remember the visitor fails', () => {
+  const r = probeFreshStart({ expectFreshStart: true }, 'Of course, I remember you! I start fresh each visit, but welcome back.');
+  assert.equal(r.pass, false);
+  assert.equal(r.claimedMemory, true);
+});
+test('freshStart: a reply that never says she starts fresh fails', () => {
+  const r = probeFreshStart({ expectFreshStart: true }, 'Happy to help with the SDK. What would you like to know?');
+  assert.equal(r.pass, false);
+  assert.equal(r.saidFresh, false);
 });
 
 /* pill answer (a pill question as the thread's first message) */

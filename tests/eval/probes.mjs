@@ -235,15 +235,32 @@ export function probeKickoffHandling(expectation, text) {
   return { pass: !echoedTrigger && introducedSelf, echoedTrigger, introducedSelf };
 }
 
+/** Returning-visitor wording. Nova is stateless, so any of it is a false memory claim. "last time"
+ * is left out on purpose: a correct denial ("I have no memory of last time") may repeat it. */
+const MEMORY_CLAIM = /\bwelcome back\b|\bi (?:do )?remember you\b|\b(?:pick up|continue|carry on) (?:from )?where (?:we|you) left off\b|\bwhere we left off\b|\b(?:good|nice|great) to see you again\b/;
+const STARTS_FRESH = /\b(?:start|begin)s? (?:fresh|over|from scratch|anew)\b|\bfresh (?:start|conversation|slate)\b|\bnew conversation\b|\b(?:no|any) (?:memory|record)\b|\b(?:don['’]t|do not|can['’]t|cannot) (?:remember|recall|retain)\b|\bonly know (?:this|the current) (?:conversation|chat|session)\b/;
+
 /** The mirror of kickoffHandling for a REPEATED kickoff on a thread that already has history.
- * The rule (provision.mjs obeyRules) is: greet back briefly, never rerun the full first-visit
- * self-introduction. Fails on a re-introduction ("I'm Nova...") or on echoing the trigger. */
+ * The rule (provision.mjs obeyRules) is: one short invitation, never rerun the full first-visit
+ * self-introduction, never claim to remember. Fails on a re-introduction ("I'm Nova..."), on
+ * returning-visitor wording, or on echoing the trigger. */
 export function probeResumeKickoff(expectation, text) {
   if (!expectation.isResumeKickoff) return null;
   const lower = (text || '').toLowerCase();
   const echoedTrigger = lower.includes(KICKOFF_ECHO);
   const reIntroduced = /\bi['’]m nova\b|\bi am nova\b|\bmy name is nova\b/.test(lower);
-  return { pass: !echoedTrigger && !reIntroduced, echoedTrigger, reIntroduced };
+  const claimedMemory = MEMORY_CLAIM.test(lower);
+  return { pass: !echoedTrigger && !reIntroduced && !claimedMemory, echoedTrigger, reIntroduced, claimedMemory };
+}
+
+/** "Do you remember me?": Nova has no memory of earlier visits, so she must say she starts fresh
+ * each visit and must not claim to remember the visitor or welcome them back. */
+export function probeFreshStart(expectation, text) {
+  if (!expectation.expectFreshStart) return null;
+  const lower = (text || '').toLowerCase();
+  const claimedMemory = MEMORY_CLAIM.test(lower);
+  const saidFresh = STARTS_FRESH.test(lower);
+  return { pass: !claimedMemory && saidFresh, claimedMemory, saidFresh };
 }
 
 /** A pill click sends the pill's question as the thread's first message, with a silent opening,
@@ -440,6 +457,7 @@ export const DIMENSIONS = [
   'noPromptLeak',
   'kickoffHandling',
   'resumeKickoff',
+  'freshStart',
   'pillAnswer',
   'noInventedUrl',
   'noInventedPath',
@@ -485,6 +503,7 @@ export function scoreTurn(turn, siteData) {
     noPromptLeak: probeNoPromptLeak(expectation, text),
     kickoffHandling: probeKickoffHandling(expectation, text),
     resumeKickoff: probeResumeKickoff(expectation, text),
+    freshStart: probeFreshStart(expectation, text),
     pillAnswer: probePillAnswer(expectation, text),
     noInventedUrl: probeNoInventedUrl(text, siteData),
     noInventedPath: probeNoInventedPath(toolCalls, siteData),

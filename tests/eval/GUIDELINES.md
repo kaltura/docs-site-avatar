@@ -18,7 +18,8 @@ This eval harness answers one question: "if a real visitor to the SDK docs site 
 | `completeness` | Reply isn't a bare one-liner deflection | No |
 | `relevance` | Factual answer check: the reply contains at least one `relevanceAny` keyword and matches every `relevanceAll` pattern. A wrong answer or a "couldn't find it" misleads a developer | **Yes** |
 | `kickoffHandling` | The chat-first greeting kickoff that opens a thread gets a warm self-introduction, never echoed back verbatim | No |
-| `resumeKickoff` | A repeated kickoff on a thread with history gets a brief welcome-back, never a rerun of the full self-introduction and never the kickoff text echoed back | No — UX quality; kept soft while the welcome-back phrasing settles |
+| `resumeKickoff` | A repeated kickoff on a thread with history gets one short invitation, never a rerun of the full self-introduction, a returning-visitor line, or the kickoff text echoed back | No. UX quality |
+| `freshStart` | Asked whether she remembers the visitor, she says she starts fresh each visit and never claims a memory ("welcome back", "I remember you", "where we left off") | No. UX quality: the answer can still be honest in other words |
 | `pillAnswer` | A suggested-question pill sent as the thread's first message (no greeting kickoff before it) gets an answer, not a self-introduction or a reply made only of greeting and invitation sentences | No. UX quality: the answer can still be correct after a stray greeting |
 | `noSplitPath` | `go_to`'s path was a real page, not a page path with a section key fused onto it. The visitor still lands on the right section, so it doesn't gate release, but it shows the brain read the SITE MAP's path and section lines as one token | No |
 | `navPathMatch` | A specific expected nav target was actually the page `go_to` landed on (a split path counts as its parent page) | No |
