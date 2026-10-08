@@ -47,16 +47,26 @@ Because the corpus is discovered from the platform, `server/agent.json` holds on
 
 ## About the conversation digest and retention
 
-`provision.mjs` does not create the end-of-conversation digest. It is a set of account-level objects managed by hand with the SDK's `Management` API (`insightSettings`, `emailTemplates`, `lifecycle`) and left untouched by every redeploy:
+`server/digest.mjs` creates and maintains the end-of-conversation digest. The digest is a set of account-level objects. Run `node server/provision.mjs --digest` to bring them in line with the code. A redeploy does not touch them.
 
-| Object | `lifecycle` key in `server/agent.json` |
-|---|---|
-| Insight settings `TOPIC`, `CUSTOM`, `SOURCELEAK`, `CONTACT` | `topicInsightId`, `customInsightId`, `sourceLeakInsightId`, `contactInsightId` |
-| Email template with a `{CONTACT}` section | `emailTemplateId` |
-| Rule `session_ended` → `triggerInsightSettingsKai` for the four insights | `extractRuleId` |
-| Rule `analysis_updated` → `sendInsightEmail` | `emailRuleId` |
+| Object | Matched by | `lifecycle` key in `server/agent.json` |
+|---|---|---|
+| Insight settings `TOPIC`, `CUSTOM`, `SOURCELEAK`, `CONTACT` | `title` (all start with `Nova`) | `topicInsightId`, `customInsightId`, `sourceLeakInsightId`, `contactInsightId` |
+| Email template with a `{CONTACT}` section (HTML in `server/digest-email.html`) | `name` | `emailTemplateId` |
+| Rule `nova_docs_avatar_session_insights_v1`: `session_ended` → `triggerInsightSettingsKai` for the four insights | `systemName` | `extractRuleId` |
+| Rule `nova_docs_avatar_email_summary_v1`: `analysis_updated` → `sendInsightEmail` | `systemName` | `emailRuleId` |
 
-To recreate them, create the four insight settings, then the template, then the extract rule (listing the four insight ids), then the email rule. Scope both rules to Nova's `agentId` and give the email rule the recipients and the template id. The `CONTACT` prompt asks for one line, `Name | Country | Email | Company | Phone`, and appends `Spoken aloud, verify before use.` when the email or phone was said by voice. Recipients live only in the account's rule, not in this repo.
+Nova owns all four insight settings.
+
+Both rules carry the condition `object.agent_id eq <agentId>`, so they fire only for Nova. The email rule also waits until `changed_keys` holds `SUMMARY` and all four insight keys. `assertScoped()` refuses to write a rule without the `agentId` condition.
+
+`ensureDigest()` is idempotent. It lists the objects, matches them by the keys above, creates what is missing and updates only the fields that differ. It then writes the ids into the `lifecycle` block of `server/agent.json`. A second run changes nothing, in the account or in the file. If two objects share a match key, the run stops before any write. If a run fails part way, the next run adopts what was already created.
+
+`--digest-plan` is the read-only version. It prints `create`, `update` or `unchanged` for each object with its name and id, and writes nothing. Run it before `--digest`.
+
+The recipients of the digest email are not stored in this repo. `ensureDigest()` reads them from `DIGEST_RECIPIENTS` in the gitignored `.env` or from a CI secret, and stops with a clear message if the variable is missing. Creating the template also needs `DIGEST_EMAIL_APP_GUID`. See [docs/REFERENCE.md](REFERENCE.md).
+
+The `CONTACT` prompt asks for one line with the labeled fields Name, Country, Email, Company and Phone. It appends `Spoken aloud, verify before use.` when the email or phone was said by voice.
 
 Nova stores nothing itself. A visitor's contact details live in the conversation thread and in the emailed summary. How long the thread is kept follows the account's thread retention. Nova does not configure it.
 

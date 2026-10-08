@@ -13,7 +13,9 @@
 | `scripts/audit-knowledge-records.mjs` | Finds and cleans up leaked Knowledge-record shells left behind by `--reuse` redeploys (see ARCHITECTURE.md's "Known limitations") |
 | `vendor/sdk/` | Gitignored — the fetched SDK source, populated by `postinstall` |
 | `server/provision.mjs` | Creates/redeploys/tears down Nova's live intellect, avatar, agent, knowledge base |
-| `server/agent.json` | Committed — the stable live ids (`configId`, `avatarId`, `agentId`, `widgetId`, `tag`) `provision.mjs` writes and every other command (incl. `redeploy.yml`) reads, plus a hand-maintained `lifecycle` block (see ARCHITECTURE.md's conversation digest section). Knowledge ids are discovered live from the intellect, not stored here |
+| `server/agent.json` | Committed: the stable live ids (`configId`, `avatarId`, `agentId`, `widgetId`, `tag`) `provision.mjs` writes and every other command (incl. `redeploy.yml`) reads, plus the `lifecycle` block that `--digest` writes (see ARCHITECTURE.md's conversation digest section). Knowledge ids are discovered live from the intellect, not stored here |
+| `server/digest.mjs` | Creates and updates Nova's conversation digest objects (insight settings, email template, lifecycle rules). Run through `provision.mjs --digest` |
+| `server/digest-email.html` | HTML body of the digest email template |
 | `.github/workflows/redeploy.yml` | CI: redeploy Nova in place, gated behind the `production` environment |
 | `.github/workflows/eval.yml` | CI: run the eval suite against whatever `redeploy.yml` most recently produced |
 | `docs/GETTING-STARTED.md` | Tutorial — zero to a passing eval run |
@@ -43,7 +45,7 @@
 | `fetch-sdk` | `node scripts/fetch-sdk.mjs --force` | write, idempotent (overwrites `vendor/sdk/` with the same tag's content) |
 | `provision` | `node server/provision.mjs` | write, NOT idempotent (creates a new intellect/avatar/agent/knowledge base every run — see `--reuse`/`--agent-id`/`--avatar-id` below to update in place instead) |
 | `cleanup` | `node server/provision.mjs --cleanup` | write, destructive |
-| `test:eval:unit` | `node --test tests/eval/probes.test.mjs tests/eval/provision.test.mjs tests/eval/chat-transport.test.mjs tests/eval/personas.test.mjs` | read |
+| `test:eval:unit` | `node --test tests/eval/probes.test.mjs tests/eval/provision.test.mjs tests/eval/chat-transport.test.mjs tests/eval/personas.test.mjs tests/eval/workflows.test.mjs tests/eval/digest.test.mjs` | read |
 | `eval` | `node tests/eval/run.mjs` | read (drives the live agent conversationally; writes only to `tests/eval/artifacts/`) |
 | `eval:dashboard` | `node tests/eval/dashboard/server.mjs` | read (starts a local server; each run it launches carries the same capability as `eval`) |
 
@@ -59,12 +61,14 @@
 | `--agent-id <existingAgentId>` | Update this agent in place, keeping its `widgetId` |
 | `--rebuild` | With `--reuse`: build a new knowledge corpus even if the docs hash is unchanged. The old one is deleted only after the intellect points at the new one |
 | `--verify-knowledge` | Read-only. Exit non-zero unless the live corpus has a stored docs hash and every entry is indexed. Used by `eval.yml` |
+| `--digest-plan` | Read-only. Print `create`, `update` or `unchanged` for each digest object, with names and ids only. Needs `DIGEST_RECIPIENTS` |
+| `--digest` | Create or update the digest objects and record their ids in `server/agent.json`. Idempotent. Needs `DIGEST_RECIPIENTS` |
 | `--cleanup` | Delete the agent/avatar/intellect recorded in `server/agent.json` plus the knowledge corpus the intellect links (discovered live) |
 | `--dry-run` | With `--cleanup`: list what would be deleted, make no API calls |
 | `--only <types>` | With `--cleanup`: limit to a comma-separated subset of `agent,avatar,intellect,knowledge` |
 | `--help` | Print usage and exit, no API calls |
 
-An unrecognized `--flag` exits non-zero with usage rather than being silently ignored. `--dry-run`/`--only` outside of `--cleanup` also exit non-zero.
+`--digest` and `--digest-plan` run alone: combined with another flag (or with each other) they exit non-zero. An unrecognized `--flag` exits non-zero with usage rather than being silently ignored. `--dry-run`/`--only` outside of `--cleanup` also exit non-zero.
 
 ## `tests/eval/run.mjs` flags
 
@@ -112,6 +116,8 @@ Everything a fresh clone needs is in `.env.example`; this table is what each one
 |---|---|---|
 | `AGENTIC_PARTNER_ID` | Yes | Partner ID for every `Management` call (`provision.mjs`, `run.mjs`, the dashboard) |
 | `AGENTIC_ADMIN_SECRET` | Yes | Admin secret paired with the partner ID above. Never commit a real value |
+| `DIGEST_RECIPIENTS` | For `--digest` and `--digest-plan` | Comma-separated recipients of the digest email. Set it in the gitignored `.env` or as a CI secret. Never commit it |
+| `DIGEST_EMAIL_APP_GUID` | Only when the email template does not exist yet | Messaging app id of the account, needed to create the template. Not needed to update it |
 | `SITE_REPO_DIR` | No | Overrides the default docs-site checkout path `site-root.mjs` resolves to. Flag (`--site-dir`) takes precedence over this; this takes precedence over the default sibling checkout (`../intelligent-agents-sdk-site`) |
 | `AGENTIC_GENIE_URL` | No | Overrides the conversation backend both eval transports talk to: the `Management` client behind `transport.mjs` and the dashboard, and `chat-transport.mjs`'s `KalturaChatSession`. Defaults to production |
 | `NOVA_DASHBOARD_PORT` | No | Port for `npm run eval:dashboard`. Defaults to `8093`. The dashboard also accepts a positional CLI arg (`node tests/eval/dashboard/server.mjs 9000`), checked before this env var |

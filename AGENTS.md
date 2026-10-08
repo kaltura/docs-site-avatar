@@ -23,6 +23,7 @@ This repo is standalone (it vendors the SDK from jsDelivr, no local checkout nee
 | Unit tests (probes + provision helpers) | `npm run test:eval:unit` | No |
 | Syntax-check `provision.mjs` | `node --check server/provision.mjs` | No |
 | Secret scan | `node scripts/scan-secrets.mjs` | No |
+| Preview the conversation digest change | `node server/provision.mjs --digest-plan` | Yes (read-only, needs `DIGEST_RECIPIENTS`) |
 | Full live eval run | `node tests/eval/run.mjs` | Yes |
 | Eval dashboard | `npm run eval:dashboard` | Yes |
 | Reliability check (pass^k) | `node tests/eval/run.mjs --trials 3` | Yes |
