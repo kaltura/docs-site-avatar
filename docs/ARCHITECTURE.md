@@ -43,7 +43,22 @@ This matters because this SDK's own [docs/CLIENT-COMMANDS.md § Gotcha 2](https:
 
 A `--reuse` redeploy discovers the intellect's current knowledge corpus live (intellect → linked record → category → entries) rather than reading it from a file. The category carries a sha256 fingerprint of the docs it was built from in its `referenceId`. It is written only after the poll confirms every entry is indexed, so a half-finished upload or a corpus with error entries never passes as complete. The fingerprint covers the chunk version, the manifest keys and the docs. The chunk version (`CHUNK_FORMAT`) is derived from the chunker's output on a fixed sample page, so a chunker change rebuilds the corpus with no manual bump. If the fingerprint matches the docs in the site checkout, the corpus is reused and the indexing wait is skipped. A matching corpus still gets one status pass, and if any entry is not confirmed indexed, it is rebuilt. If it differs, or is missing, provision.mjs builds a new corpus first and deletes the old category, entries, and record only after the intellect points at the new one. Verified live: the category and all of its entries are reliably deleted this way (a get-after-delete on either 404s). The record object itself is a separate, smaller leak — see "Known limitations" below.
 
-Because the corpus is discovered from the platform, `server/agent.json` holds only the five ids that never change on a redeploy: `configId`, `avatarId`, `agentId`, `widgetId`, `tag`. A `--reuse` run rewrites the file byte-identical, and `redeploy.yml` fails if it does not. Nothing is committed back from CI.
+Because the corpus is discovered from the platform, `server/agent.json` holds only ids that never change on a redeploy: `configId`, `avatarId`, `agentId`, `widgetId`, `tag`, and the `lifecycle` block described below. A `--reuse` run rewrites the file byte-identical, and `redeploy.yml` fails if it does not. Nothing is committed back from CI.
+
+## About the conversation digest and retention
+
+`provision.mjs` does not create the end-of-conversation digest. It is a set of account-level objects managed by hand with the SDK's `Management` API (`insightSettings`, `emailTemplates`, `lifecycle`) and left untouched by every redeploy:
+
+| Object | `lifecycle` key in `server/agent.json` |
+|---|---|
+| Insight settings `TOPIC`, `CUSTOM`, `SOURCELEAK`, `CONTACT` | `topicInsightId`, `customInsightId`, `sourceLeakInsightId`, `contactInsightId` |
+| Email template with a `{CONTACT}` section | `emailTemplateId` |
+| Rule `session_ended` → `triggerInsightSettingsKai` for the four insights | `extractRuleId` |
+| Rule `analysis_updated` → `sendInsightEmail` | `emailRuleId` |
+
+To recreate them, create the four insight settings, then the template, then the extract rule (listing the four insight ids), then the email rule. Scope both rules to Nova's `agentId` and give the email rule the recipients and the template id. The `CONTACT` prompt asks for one line, `Name | Country | Email | Company | Phone`, and appends `Spoken aloud, verify before use.` when the email or phone was said by voice. Recipients live only in the account's rule, not in this repo.
+
+Nova stores nothing itself. A visitor's contact details live in the conversation thread and in the emailed summary. How long the thread is kept follows the account's thread retention. Nova does not configure it.
 
 ## About redeploying and evaluating via GitHub Actions
 

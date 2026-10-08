@@ -13,7 +13,7 @@
 | `scripts/audit-knowledge-records.mjs` | Finds and cleans up leaked Knowledge-record shells left behind by `--reuse` redeploys (see ARCHITECTURE.md's "Known limitations") |
 | `vendor/sdk/` | Gitignored — the fetched SDK source, populated by `postinstall` |
 | `server/provision.mjs` | Creates/redeploys/tears down Nova's live intellect, avatar, agent, knowledge base |
-| `server/agent.json` | Committed — the five stable live ids (`configId`, `avatarId`, `agentId`, `widgetId`, `tag`) `provision.mjs` writes and every other command (incl. `redeploy.yml`) reads. Knowledge ids are discovered live from the intellect, not stored here |
+| `server/agent.json` | Committed — the stable live ids (`configId`, `avatarId`, `agentId`, `widgetId`, `tag`) `provision.mjs` writes and every other command (incl. `redeploy.yml`) reads, plus a hand-maintained `lifecycle` block (see ARCHITECTURE.md's conversation digest section). Knowledge ids are discovered live from the intellect, not stored here |
 | `.github/workflows/redeploy.yml` | CI: redeploy Nova in place, gated behind the `production` environment |
 | `.github/workflows/eval.yml` | CI: run the eval suite against whatever `redeploy.yml` most recently produced |
 | `docs/GETTING-STARTED.md` | Tutorial — zero to a passing eval run |
