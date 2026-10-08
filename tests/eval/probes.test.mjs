@@ -733,3 +733,76 @@ test('accuracy: token refresh names setToken and rejects an invented expiry even
     'Yes, there is an event for that. Listen for it and refresh.',
   ]) assert.equal(probeRelevance(t, b).pass, false, b);
 });
+
+/* answer-accuracy turns (issue #194): each accepts the documented answer and rejects its known wrong form */
+test('accuracy: lifecycle names exactly the three creatable types and no invented one', () => {
+  const t = knowledgeTurn('Which lifecycle action types can I create');
+  assert.equal(probeRelevance(t, 'You can create triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai. There is no webhook action.').pass, true);
+  for (const b of [
+    'You can create triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai, plus a webhook action.',
+    'Use triggerInsightSettingsKai, sendInsightEmail, triggerDtcKai, or tag a thread.',
+    'There are two: sendInsightEmail and triggerDtcKai.',
+    'In Phase 2 you get triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai.',
+  ]) assert.equal(probeRelevance(t, b).pass, false, b);
+});
+test('accuracy: repo answer has the repo path and never claims an npm package', () => {
+  const t = knowledgeTurn('Where is your GitHub repo');
+  assert.equal(probeRelevance(t, 'The source is at https://github.com/kaltura/intelligent-agents-sdk/. It is not published to npm, so use jsDelivr or GitHub.').pass, true);
+  for (const b of [
+    'Find it on npmjs.com under @kaltura/intelligent-agents.',
+    'The package is published on npm and the repo is at github.com/kaltura/intelligent-agents-sdk.',
+    'I am not sure where the repo is.',
+  ]) assert.equal(probeRelevance(t, b).pass, false, b);
+});
+test('accuracy: compliance answer names the BAA route, never claims certification or opens with Yes', () => {
+  const t = knowledgeTurn('HIPAA or HITRUST certified');
+  assert.equal(probeRelevance(t, 'The SDK maps its controls to HIPAA and HITRUST but is not certified. Kaltura offers a BAA: ask your Kaltura Account Manager.').pass, true);
+  for (const b of [
+    'Yes, the SDK is HIPAA certified. Ask your Account Manager about a BAA.',
+    'It is certified for HITRUST. Ask your Account Manager about the BAA.',
+    'The SDK maps its controls to HIPAA and HITRUST.',
+  ]) assert.equal(probeRelevance(t, b).pass, false, b);
+});
+test('accuracy: languages answer asks back, mentions setForcedLanguage and the Account Manager', () => {
+  const t = knowledgeTurn('Which languages can the avatar speak');
+  assert.equal(probeRelevance(t, 'Which languages do you need? I can show you setForcedLanguage, and your Kaltura Account Manager has the current list.').pass, true);
+  for (const b of [
+    'Which languages do you need? Ask your Kaltura Account Manager.',
+    'Use setForcedLanguage. Your Account Manager has the list.',
+    'Which languages do you need? Use setForcedLanguage.',
+  ]) assert.equal(probeRelevance(t, b).pass, false, b);
+});
+test('accuracy: embed answer points to the Avatar Studio embed', () => {
+  const t = knowledgeTurn('Is there an embed snippet');
+  assert.equal(probeRelevance(t, 'Yes, the Avatar Studio embed gives you a ready widget. The SDK is for building your own experience.').pass, true);
+  assert.equal(probeRelevance(t, 'The SDK has a mountWidget helper for that.').pass, false);
+});
+test('accuracy: DPP gets request variables and no expansion of the acronym', () => {
+  const t = knowledgeTurn('use DPP');
+  assert.equal(probeRelevance(t, 'Use request variables: pass requestVars at creation and call updateRequestVars to change them.').pass, true);
+  for (const b of [
+    'DPP stands for dynamic prompt parameters. Use requestVars.',
+    'DPP (Dynamic Prompting Parameters) are set with updateRequestVars.',
+    'I am not sure what you mean.',
+  ]) assert.equal(probeRelevance(t, b).pass, false, b);
+});
+test('accuracy: reconnect answer names the socket, media and cold layers, never a Phase 2', () => {
+  const t = knowledgeTurn('recover when the connection drops');
+  assert.equal(probeRelevance(t, 'Three layers: the control socket reconnects, the media peers restart ICE or re-subscribe, and a cold reconnect of the whole session is the last step.').pass, true);
+  assert.equal(probeRelevance(t, 'It reconnects automatically.').pass, false);
+  assert.equal(probeRelevance(t, 'Phase 2 adds a socket reconnect, media restart and a cold reconnect.').pass, false);
+});
+test('accuracy: chroma key is bring-your-own', () => {
+  const t = knowledgeTurn('chroma-key video compositor');
+  assert.equal(probeRelevance(t, 'No, the SDK does not ship one. You bring your own chroma-key compositor.').pass, true);
+  assert.equal(probeRelevance(t, 'Yes, the SDK includes a compositor.').pass, false);
+});
+test('accuracy: face-only turns need a question, then MCP and the Account Manager', () => {
+  const [q, own, flow] = ['plug our own LLM', 'our own knowledge base and customer memory', 'run the whole conversation flow'].map(knowledgeTurn);
+  assert.equal(probeRelevance(q, 'Your own brain is the Your Expertise flow. Why do you want only the face?').pass, true);
+  assert.equal(probeRelevance(q, 'Yes, you can plug it in.').pass, false);
+  assert.equal(probeRelevance(own, 'Use an MCP server or API integrations for your knowledge. An external LLM goes through your Kaltura Account Manager.').pass, true);
+  assert.equal(probeRelevance(own, 'Use an API integration for your knowledge.').pass, false);
+  assert.equal(probeRelevance(flow, 'That is complex: turn-taking and interruptions are yours to build. Talk to your Account Rep.').pass, true);
+  assert.equal(probeRelevance(flow, 'Sure, go ahead.').pass, false);
+});
