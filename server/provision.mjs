@@ -1189,14 +1189,15 @@ async function ovpMultirequest(admin, calls) {
   return data;
 }
 
-/** The delete calls whose result is an exception. "Not found" counts as deleted already. */
+/** The delete calls whose result is an exception or missing. A delete that worked returns `null`, and
+ * "not found" counts as deleted already. */
 export function multirequestFailures(calls, results) {
   return calls.flatMap((c, i) => {
     const r = results[i];
     const kind = c.service === 'category' ? 'category' : 'entry';
     const id = c.entryId ?? c.id;
-    if (!r) return [{ kind, id, code: 'NO_RESULT' }];
-    if (r.objectType !== 'KalturaAPIException' || /_NOT_FOUND$/.test(r.code)) return [];
+    if (r === undefined) return [{ kind, id, code: 'NO_RESULT' }];
+    if (r === null || r.objectType !== 'KalturaAPIException' || /_NOT_FOUND$/.test(r.code)) return [];
     return [{ kind, id, code: r.code }];
   });
 }
