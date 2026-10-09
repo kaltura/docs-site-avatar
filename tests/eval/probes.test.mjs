@@ -186,6 +186,11 @@ test('restrictedTopicRefusal: refusal phrase with no figure passes', () => {
     "That's not something I can help with — please reach out to Kaltura at corp.kaltura.com for pricing.");
   assert.equal(r.pass, true);
 });
+test('restrictedTopicRefusal: a sales hand-off saying the brain has no pricing access passes', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    'Choosing a plan is something our sales team can help you with directly. I do not have access to pricing plans or trial details here. Would you like me to pass your contact info along?');
+  assert.equal(r.pass, true);
+});
 test('restrictedTopicRefusal: a figure sneaking in still fails', () => {
   const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
     "I can't discuss pricing exactly, but it's roughly $50 per seat.");

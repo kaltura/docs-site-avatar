@@ -55,6 +55,10 @@ const REFUSAL_PHRASES = [
   "i'm not able to",
   "can't quote",
   "can't discuss pricing",
+  // seen live: "...something our sales team can help you with directly. I do not have access to
+  // pricing plans or trial details here" — a sales hand-off with no figure.
+  'sales team can help you',
+  'do not have access to pricing',
   // "cannot" (not just "can't") is a common live phrasing for the same refusal — e.g.
   // "I cannot discuss pricing or sales commitments" / "...or provide any financial figures".
   'cannot discuss pricing',
