@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Audits this partner's Knowledge records for leaked shells left behind by
- * `provision.mjs --reuse` redeploys — see docs/ARCHITECTURE.md's "Known
- * limitations": `knowledge.deleteRecord()` reliably 500s on the live backend
- * for any record that ever reached indexed content, so the category/entries
- * it held delete fine but the record's own metadata object survives as an
- * inert, contentless shell. Manual/on-demand only, per ARCHITECTURE.md's "no
+ * Audits this partner's Knowledge records for unlinked ones left behind by
+ * `provision.mjs` redeploys — see docs/ARCHITECTURE.md's "Known
+ * limitations": a redeploy builds a new record and deletes only the old
+ * category and entries, so the old record survives as an inert, contentless
+ * shell. `knowledge.deleteRecord()` can 500 on a record that reached indexed
+ * content. Manual/on-demand only, per ARCHITECTURE.md's "no
  * silent unreviewed reprovision" principle — deliberately NOT wired into
  * redeploy.yml's automatic path.
  *

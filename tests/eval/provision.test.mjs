@@ -781,22 +781,27 @@ test('multirequestFailures: reads each result; an exception inside HTTP 200 is a
 test('deleteKnowledge: returns and logs every failed delete, including per-call errors in a 200 response', async () => {
   const logs = [];
   const failures = await deleteKnowledge('ks', { recordIds: [11], categoryIds: [7], entryIds: ['e1', 'e2'] }, {
-    deleteRecord: async () => { throw Object.assign(new Error('boom'), { code: 'server_error' }); },
     multirequest: async () => [apiError('ENTRY_LOCKED'), {}, {}],
     log: (m) => logs.push(m),
   });
-  assert.deepEqual(failures, [{ kind: 'record', id: 11, code: 'server_error' }, { kind: 'entry', id: 'e1', code: 'ENTRY_LOCKED' }]);
+  assert.deepEqual(failures, [{ kind: 'entry', id: 'e1', code: 'ENTRY_LOCKED' }]);
   assert.equal(logs.length, 1);
-  assert.match(logs[0], /2 knowledge delete\(s\) failed: record 11: server_error; entry e1: ENTRY_LOCKED/);
+  assert.match(logs[0], /1 knowledge delete\(s\) failed: entry e1: ENTRY_LOCKED/);
 });
 
 test('deleteKnowledge: a failed multirequest is one batch failure; a clean delete returns nothing and logs nothing', async () => {
   const logs = [];
   const failed = await deleteKnowledge('ks', { categoryIds: [7], entryIds: ['e1'] }, { multirequest: async () => { throw new Error('multirequest HTTP 502'); }, log: (m) => logs.push(m) });
   assert.deepEqual(failed, [{ kind: 'batch', id: '1 entries, categories 7', code: 'multirequest HTTP 502' }]);
-  const clean = await deleteKnowledge('ks', { recordIds: [1], categoryIds: [7], entryIds: ['e1'] }, { deleteRecord: async () => {}, multirequest: async (calls) => calls.map(() => ({})), log: (m) => logs.push(m) });
+  const clean = await deleteKnowledge('ks', { recordIds: [1], categoryIds: [7], entryIds: ['e1'] }, { multirequest: async (calls) => calls.map(() => ({})), log: (m) => logs.push(m) });
   assert.deepEqual(clean, []);
   assert.equal(logs.length, 1);
+});
+
+test('deleteKnowledge: never deletes the knowledge record, only the entries and category', async () => {
+  const seen = [];
+  await deleteKnowledge('ks', { recordIds: [11], categoryIds: [7], entryIds: ['e1'] }, { multirequest: async (calls) => { seen.push(...calls); return calls.map(() => null); }, log: () => {} });
+  assert.deepEqual(seen.map((c) => `${c.service}/${c.action}`), ['baseentry/delete', 'category/delete']);
 });
 
 test('summarizeDeleteFailures: names the first few and counts the rest', () => {

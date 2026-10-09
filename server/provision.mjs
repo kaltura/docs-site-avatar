@@ -874,8 +874,8 @@ async function provisionSteps(ctx) {
   ctx.undo = null; // the intellect serves the new corpus now, so it must never be rolled back
   // The outgoing corpus is safe to delete.
   if (live && newCorpus) {
-    console.log(`✓ removing previous knowledge corpus (record ${live.recordIds.join(',') || 'none'}, category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries)`);
-    const leftovers = (await deleteKnowledge(admin, live)).filter((f) => f.kind !== 'record');
+    console.log(`✓ removing previous knowledge corpus entries (category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries; the unlinked record ${live.recordIds.join(',') || 'none'} is left in place)`);
+    const leftovers = await deleteKnowledge(admin, live);
     if (leftovers.length) problems.push(`${leftovers.length} delete call(s) for the previous corpus failed, so its entries or category may be orphaned`);
   }
 
@@ -1213,25 +1213,18 @@ export function summarizeDeleteFailures(failures, max = 10) {
 }
 
 /**
- * Delete knowledge records + their categories + every entry in them. Used three ways: `cleanup()`
- * on the intellect's current corpus, `provision()` on the outgoing corpus once the intellect has
- * been repointed to the new one, and `provision()` on a half-built new corpus when the build or
- * the repoint fails. Without the first two, every `--reuse` redeploy would orphan the prior
- * category/record/entries.
- * Never throws. Returns every failure as `{kind: 'record'|'entry'|'category'|'batch', id, code}`
- * and logs them as one summary. A record that held indexed content is expected to fail (see
- * ARCHITECTURE.md "Known limitations"), so callers treat `record` failures as a warning only.
- * `deleteRecord`, `multirequest` and `log` are injectable for tests.
+ * Delete a corpus's entries and categories. Used three ways: `cleanup()` on the intellect's current
+ * corpus, `provision()` on the outgoing corpus once the intellect has been repointed to the new
+ * one, and `provision()` on a half-built new corpus when the build or the repoint fails.
+ * It never deletes the knowledge record itself. Every redeploy builds a new record, and the old one
+ * is left unlinked and empty (see ARCHITECTURE.md "Known limitations").
+ * Never throws. Returns every failure as `{kind: 'entry'|'category'|'batch', id, code}` and logs
+ * them as one summary. `multirequest` and `log` are injectable for tests.
  */
-export async function deleteKnowledge(admin, { recordIds = [], categoryIds = [], entryIds = [] } = {}, {
-  // force:true: this is a deliberate teardown, so skip the SDK's default in-use guard.
-  deleteRecord = (id) => kaltura.knowledge.deleteRecord(id, admin, { confirmPermanent: true, force: true }),
+export async function deleteKnowledge(admin, { categoryIds = [], entryIds = [] } = {}, {
   multirequest = (calls) => ovpMultirequest(admin, calls), log = console.error,
 } = {}) {
   const failures = [];
-  for (const recordId of recordIds) {
-    await deleteRecord(recordId).catch((e) => failures.push({ kind: 'record', id: recordId, code: e.code || e.message }));
-  }
   if (categoryIds.length) {
     const calls = entryIds.map((entryId) => ({ service: 'baseentry', action: 'delete', entryId }));
     for (const id of categoryIds) calls.push({ service: 'category', action: 'delete', id });
@@ -1309,8 +1302,7 @@ async function cleanup(opts = {}) {
       log(`knowledge-of-intellect:${saved.configId}`);
     } else if (knowledge) {
       const failures = await deleteKnowledge(admin, knowledge);
-      if (failures.some((f) => f.kind !== 'record')) process.exitCode = 1;
-      knowledge.recordIds.forEach((id) => log(`knowledge-record:${id}`));
+      if (failures.length) process.exitCode = 1;
       knowledge.categoryIds.forEach((id) => log(`knowledge-category:${id}`));
       log(`knowledge-entries:${knowledge.entryIds.length}`);
     }
