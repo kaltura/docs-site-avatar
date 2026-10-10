@@ -266,6 +266,18 @@ export function buildPersonas(siteData) {
           capabilities: { use_knowledge_base: 'on' },
           relevanceAny: ['never match', 'not match', "won't match", 'will not match', 'default', 'agent token', 'createagenttoken'],
         },
+        {
+          prompt: 'My connect() call rejected with a timeout. How do I tell which step ran out of time?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['error.phase', 'phase'],
+        },
+        {
+          prompt: 'What does session.prepare() do, and does it ask the visitor for the microphone?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['socket', 'join', 'ahead of', 'before connect'],
+          // The wrong answer claims prepare() asks for the microphone or starts the avatar.
+          relevanceNone: ['\\bprepare\\(\\)[^.]{0,60}\\b(asks?|requests?|prompts?)\\b[^.]{0,30}\\b(for )?(the )?(mic|microphone)\\b'],
+        },
       ],
     },
     {
