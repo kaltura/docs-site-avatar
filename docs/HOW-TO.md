@@ -24,7 +24,9 @@ To check the live knowledge base without deploying:
 node server/provision.mjs --verify-knowledge
 ```
 
-It is read-only. It exits non-zero unless the last deploy confirmed every entry indexed and every entry is indexed now. `eval.yml` runs it first.
+It is read-only. It waits up to 45 minutes for every entry to finish indexing (change it with `--index-wait-minutes <n>`), then exits non-zero if a deploy never stored the docs hash, an entry has an error status, or the wait ran out. Running out of the wait rebuilds nothing: run it again later. `eval.yml` runs it first.
+
+A redeploy that ends with a "not confirmed indexed yet" warning still succeeded. The indexer is still working, so check later with the command above.
 
 ## Create or update the conversation digest
 

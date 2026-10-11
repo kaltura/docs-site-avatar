@@ -60,7 +60,8 @@
 | `--avatar-id <existingAvatarId>` | Skip the preset pick, use this avatar as-is |
 | `--agent-id <existingAgentId>` | Update this agent in place, keeping its `widgetId` |
 | `--rebuild` | With `--reuse`: build a new knowledge corpus even if the docs hash is unchanged. The old one is deleted only after the intellect points at the new one |
-| `--verify-knowledge` | Read-only. Exit non-zero unless the live corpus has a stored docs hash and every entry is indexed. Used by `eval.yml` |
+| `--verify-knowledge` | Read-only. Wait for indexing, then exit non-zero unless the live corpus has a stored docs hash and every entry is indexed. Used by `eval.yml` |
+| `--index-wait-minutes <n>` | With `--verify-knowledge`: how long to wait for indexing. Default 45 |
 | `--digest-plan` | Read-only. Print `create`, `update` or `unchanged` for each digest object, with names and ids only. Needs `DIGEST_RECIPIENTS` |
 | `--digest` | Create or update the digest objects and record their ids in `server/agent.json`. Idempotent. Needs `DIGEST_RECIPIENTS` |
 | `--cleanup` | Delete the agent/avatar/intellect recorded in `server/agent.json` plus the knowledge corpus the intellect links (discovered live) |

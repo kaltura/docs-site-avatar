@@ -44,7 +44,9 @@ jobs:
     needs: gate
     if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 45
+    # The verify step waits up to 45 min for indexing (--index-wait-minutes). The eval itself takes
+    # about 10 min at the default single trial, so the other 45 min leave room for more trials.
+    timeout-minutes: 90
     environment: production
     permissions:
       contents: read
@@ -66,7 +68,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Check the knowledge base is fully indexed
+      - name: Wait until the knowledge base is fully indexed
         env:
           AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
           AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}

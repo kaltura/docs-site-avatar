@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+process.env.AGENTIC_PARTNER_ID ||= 'test-partner';
+process.env.AGENTIC_ADMIN_SECRET ||= 'test-secret';
+const { VERIFY_WAIT_DEFAULT_MIN } = await import('../../server/provision.mjs');
+
 const wf = (name) => readFileSync(fileURLToPath(new URL(`../../.github/workflows/${name}`, import.meta.url)), 'utf8');
 const redeploy = wf('redeploy.yml');
 const evalWf = wf('eval.yml');
@@ -27,6 +31,12 @@ test('eval.yml: verifies the knowledge base before the eval runs', () => {
   const run = evalWf.indexOf('node tests/eval/run.mjs');
   assert.ok(verify > 0, 'verify step present');
   assert.ok(verify < run, 'verify step runs first');
+});
+
+test('eval.yml: the eval job timeout holds the verify wait plus the eval run', () => {
+  const job = evalWf.slice(evalWf.indexOf('  eval:'));
+  const timeout = Number(job.match(/^ {4}timeout-minutes: (\d+)$/m)?.[1]);
+  assert.ok(timeout >= VERIFY_WAIT_DEFAULT_MIN + 45, `timeout-minutes ${timeout} must cover the ${VERIFY_WAIT_DEFAULT_MIN} min verify wait plus the eval`);
 });
 
 test('nightly and dispatched redeploys skip the eval when the knowledge base was not rebuilt', () => {
