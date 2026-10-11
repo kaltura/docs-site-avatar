@@ -82,3 +82,10 @@ test('contact-request-declined: she drops it, with no storage claim', () => {
   assert.equal(probeRelevance(t, 'Understood. Your details are saved anyway.').pass, false);
   assert.equal(probeRelevance(t, 'Understood, but what is your email so I can follow up?').pass, false);
 });
+
+test('prepare() probe: flags a claim that it asks for the microphone, accepts the correct negated answer', () => {
+  const turn = buildPersonas(siteData(8)).flatMap((p) => p.turns).find((t) => t.prompt.includes('session.prepare() do'));
+  const re = new RegExp(turn.relevanceNone[0], 'i');
+  for (const wrong of ['session.prepare() asks the visitor for microphone permission.', 'prepare() requests the microphone first.']) assert.match(wrong, re, wrong);
+  for (const right of ['session.prepare() never asks the visitor for microphone permissions.', 'prepare() does not ask for the microphone.', "prepare() doesn't request the microphone."]) assert.doesNotMatch(right, re, right);
+});

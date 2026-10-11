@@ -276,7 +276,7 @@ export function buildPersonas(siteData) {
           capabilities: { use_knowledge_base: 'on' },
           relevanceAny: ['socket', 'join', 'ahead of', 'before connect'],
           // The wrong answer claims prepare() asks for the microphone or starts the avatar.
-          relevanceNone: ['\\bprepare\\(\\)[^.]{0,60}\\b(asks?|requests?|prompts?)\\b[^.]{0,30}\\b(for )?(the )?(mic|microphone)\\b'],
+          relevanceNone: ['\\bprepare\\(\\)[^.]{0,60}(?<!(?:\\b(?:no|not|never)|n.t)\\s)\\b(asks?|requests?|prompts?)\\b[^.]{0,30}\\b(for )?(the )?(mic|microphone)\\b'],
         },
       ],
     },
