@@ -16,8 +16,9 @@ const {
   buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, OPENING_INTRO, NOVA_GREET_VAR, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup, SIGNUP_LINK_TOOL_NAME, signupLinkTool,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
-  chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry, indexProblem, storeHashIfIndexed,
-  multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem,
+  chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry,
+  reportUnconfirmed, failedEntriesProblem, canReuseCorpus, sealNewCorpus,
+  multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem, waitForKnowledgeReady, verifyWaitMs,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
 const { SILENT_OPENING, isSilentOpening } = await import('../../vendor/sdk/src/management/index.js');
@@ -746,21 +747,86 @@ test('withRetry: a non-transient error is not retried, and the last error surfac
   assert.equal(n, 3);
 });
 
-/* K2: the docs hash is stored only after the poll confirms every entry. */
-test('indexProblem: null only when nothing is failed or pending', () => {
-  assert.equal(indexProblem({ indexed: 2, failed: [], pending: [] }), null);
-  assert.equal(indexProblem({ indexed: 1, failed: ['a'], pending: [] }), '1 with an error status');
-  assert.equal(indexProblem({ indexed: 0, failed: ['a'], pending: ['b', 'c'] }), '1 with an error status, 2 not confirmed indexed');
+/* K2: slow indexing only alerts. The docs hash is stored at the swap, whatever the poll found. */
+test('reportUnconfirmed: pending entries produce a warning annotation and a job-summary line', () => {
+  const logs = [];
+  const summary = [];
+  const msg = reportUnconfirmed({ pending: ['a', 'b'] }, 390, 25 * 60_000, {
+    env: { GITHUB_STEP_SUMMARY: '/tmp/summary.md' }, log: (m) => logs.push(m), appendSummary: (f, t) => summary.push([f, t]),
+  });
+  assert.match(msg, /^2 of 390 knowledge entries are not confirmed indexed yet \(waited 25 min\)\. Nothing was rebuilt/);
+  assert.deepEqual(logs, [`::warning::${msg}`]);
+  assert.deepEqual(summary, [['/tmp/summary.md', `- :warning: ${msg}\n`]]);
 });
 
-test('storeHashIfIndexed: the hash is written on a clean poll and never on a timeout or an error entry', async () => {
-  let stored = 0;
-  const store = async () => { stored++; };
-  assert.equal(await storeHashIfIndexed({ failed: [], pending: ['a'] }, store), '1 not confirmed indexed');
-  assert.equal(await storeHashIfIndexed({ failed: ['a'], pending: [] }, store), '1 with an error status');
-  assert.equal(stored, 0);
-  assert.equal(await storeHashIfIndexed({ failed: [], pending: [] }, store), null);
-  assert.equal(stored, 1);
+test('reportUnconfirmed: no summary file outside CI, and nothing at all when nothing is pending', () => {
+  const logs = [];
+  const append = () => assert.fail('must not write a summary');
+  assert.ok(reportUnconfirmed({ pending: ['a'] }, 1, 0, { env: {}, log: (m) => logs.push(m), appendSummary: append }));
+  assert.equal(logs.length, 1);
+  assert.equal(reportUnconfirmed({ pending: [] }, 1, 0, { env: { GITHUB_STEP_SUMMARY: '/x' }, log: (m) => logs.push(m), appendSummary: append }), null);
+  assert.equal(logs.length, 1);
+});
+
+test('failedEntriesProblem: only entries with an error status are a problem, pending ones are not', () => {
+  assert.equal(failedEntriesProblem({ failed: [], pending: ['a'] }), null);
+  assert.match(failedEntriesProblem({ failed: ['a', 'b'], pending: [] }), /^2 knowledge entries finished indexing with an error status/);
+});
+
+test('swap: the hash is stored right after the swap even when the indexing poll timed out, and the run has no problems', async () => {
+  const h = pollHarness(() => ({ entries: [] }), { budgetMs: 90_000 });
+  const tally = await h.run(['a', 'b']);
+  assert.deepEqual(tally.pending, ['a', 'b'], 'the poll timed out');
+  const logs = [];
+  reportUnconfirmed(tally, 2, h.clock(), { env: {}, log: (m) => logs.push(m) });
+  assert.ok(logs[0].startsWith('::warning::2 of 2 knowledge entries are not confirmed indexed yet'));
+  assert.equal(failedEntriesProblem(tally), null, 'a timeout is not a problem, so the run exits 0');
+  const order = [];
+  const problems = await sealNewCorpus({ storeHash: async () => { order.push('hash'); }, removePrevious: async () => { order.push('delete old'); return []; } });
+  assert.deepEqual(order, ['hash', 'delete old']);
+  assert.deepEqual(problems, []);
+});
+
+test('sealNewCorpus: a failed hash write is a problem but still removes the previous corpus', async () => {
+  const order = [];
+  const problems = await sealNewCorpus({
+    storeHash: async () => { throw Object.assign(new Error('boom'), { code: 'server_error' }); },
+    removePrevious: async () => { order.push('delete old'); return ['1 delete call(s) failed']; },
+  });
+  assert.deepEqual(order, ['delete old']);
+  assert.equal(problems.length, 2);
+  assert.match(problems[0], /docs hash not stored \(server_error\), so the next run rebuilds/);
+  assert.deepEqual(await sealNewCorpus({ storeHash: async () => {}, removePrevious: null }), [], 'a first deploy has no previous corpus');
+});
+
+const liveCorpus = { recordIds: [1], categoryIds: [2], entryIds: ['a', 'b'], docsHash: 'h1' };
+const reuse = (live, hash, force, tally) => {
+  const logs = [];
+  const alerts = [];
+  return canReuseCorpus(live, hash, force, { checkStatus: async () => tally, report: (...a) => alerts.push(a), log: (m) => logs.push(m) })
+    .then((reused) => ({ reused, logs, alerts }));
+};
+
+test('canReuseCorpus: a matching hash with entries still pending is reused and only alerts', async () => {
+  const r = await reuse(liveCorpus, 'h1', false, { indexed: 1, failed: [], pending: ['b'] });
+  assert.equal(r.reused, true);
+  assert.equal(r.alerts.length, 1);
+  assert.deepEqual(r.alerts[0][0].pending, ['b']);
+  assert.deepEqual(r.logs, []);
+});
+
+test('canReuseCorpus: an entry with an error status rebuilds, a clean matching corpus does not', async () => {
+  const bad = await reuse(liveCorpus, 'h1', false, { indexed: 1, failed: ['b'], pending: [] });
+  assert.equal(bad.reused, false);
+  assert.match(bad.logs[0], /1 entries of the live corpus finished indexing with an error status, rebuilding/);
+  assert.equal((await reuse(liveCorpus, 'h1', false, { indexed: 2, failed: [], pending: [] })).reused, true);
+});
+
+test('canReuseCorpus: a changed hash, a forced rebuild or no live corpus rebuilds without any status call', async () => {
+  const noStatus = async () => assert.fail('must not check status');
+  for (const [live, hash, force] of [[liveCorpus, 'h2', false], [liveCorpus, 'h1', true], [null, 'h1', false], [{ ...liveCorpus, docsHash: null }, 'h1', false]]) {
+    assert.equal(await canReuseCorpus(live, hash, force, { checkStatus: noStatus }), false);
+  }
 });
 
 /* K5: delete results are read, failures reported. */
@@ -812,14 +878,43 @@ test('summarizeDeleteFailures: names the first few and counts the rest', () => {
   assert.ok(!line.includes('e11'));
 });
 
-/* K7: the eval entry point checks the live corpus. */
-test('knowledgeProblem: a corpus passes only when a deploy confirmed it and every entry is indexed now', () => {
-  const live = { recordIds: [1], categoryIds: [2], entryIds: ['a'], docsHash: 'abc' };
-  const clean = { failed: [], pending: [] };
-  assert.equal(knowledgeProblem(live, clean), null);
-  assert.match(knowledgeProblem(null, null), /links no knowledge record/);
-  assert.match(knowledgeProblem({ ...live, docsHash: null }, clean), /no docs hash/);
-  assert.equal(knowledgeProblem(live, { failed: [], pending: ['a'] }), '1 not confirmed indexed');
+/* K7: the eval entry point waits for the live corpus to finish indexing. */
+test('knowledgeProblem: a corpus can be checked only when it is linked and a deploy stored its hash', () => {
+  assert.equal(knowledgeProblem(liveCorpus), null);
+  assert.match(knowledgeProblem(null), /links no knowledge record/);
+  assert.match(knowledgeProblem({ ...liveCorpus, docsHash: null }), /no docs hash/);
+});
+
+test('waitForKnowledgeReady: waits through pending polls, then passes once every entry is indexed', async () => {
+  const h = pollHarness((ids, n) => ({ entries: n >= 3 ? ids.map((id) => row(id, 'SUCCEEDED')) : [] }), { budgetMs: 45 * 60_000 });
+  let seen;
+  const total = await waitForKnowledgeReady(liveCorpus, 45 * 60_000, (recordId, entryIds, budget) => { seen = [recordId, budget]; return h.run(entryIds); });
+  assert.equal(total, 2);
+  assert.deepEqual(seen, [1, 45 * 60_000]);
+  assert.equal(h.clock(), 2 * 30_000, 'it waited two intervals before the third poll saw both indexed');
+});
+
+test('waitForKnowledgeReady: running out of budget throws the not-finished message and says nothing was rebuilt', async () => {
+  const h = pollHarness((ids) => ({ entries: ids.filter((id) => id === 'a').map((id) => row(id, 'SUCCEEDED')) }), { budgetMs: 2 * 60_000 });
+  await assert.rejects(
+    waitForKnowledgeReady(liveCorpus, 2 * 60_000, (r, ids) => h.run(ids)),
+    { message: 'indexing not finished after 2 min (1 of 2 entries); re-run the eval later, nothing was rebuilt' },
+  );
+});
+
+test('waitForKnowledgeReady: an error-status entry or a missing hash fails at once with the rebuild hint', async () => {
+  const h = pollHarness((ids) => ({ entries: ids.map((id) => row(id, id === 'b' ? 'NO_CHAPTERS' : 'SUCCEEDED')) }));
+  await assert.rejects(waitForKnowledgeReady(liveCorpus, 60_000, (r, ids) => h.run(ids)), /1 of 2 entries finished indexing with an error status\. Run Redeploy Nova with rebuild ticked/);
+  const noPoll = () => assert.fail('must not poll');
+  await assert.rejects(waitForKnowledgeReady({ ...liveCorpus, docsHash: null }, 60_000, noPoll), /no docs hash/);
+  await assert.rejects(waitForKnowledgeReady(null, 60_000, noPoll), /links no knowledge record/);
+});
+
+test('verifyWaitMs: defaults to 45 minutes, takes --index-wait-minutes, rejects a bad value', () => {
+  assert.equal(verifyWaitMs(['--verify-knowledge']), 45 * 60_000);
+  assert.equal(verifyWaitMs(['--verify-knowledge', '--index-wait-minutes', '10']), 10 * 60_000);
+  for (const bad of ['0', '-1', 'abc']) assert.throws(() => verifyWaitMs(['--index-wait-minutes', bad]), /positive number/);
+  assert.throws(() => verifyWaitMs(['--index-wait-minutes']), /positive number/);
 });
 
 /* sign-up link client tool (#196) */

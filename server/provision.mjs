@@ -20,16 +20,18 @@
  * CURRENT knowledge corpus live (intellect → record → category → entries, see
  * discoverKnowledge) and compares the docs fingerprint stored on that category
  * (`referenceId`, see hashDocs and wireKnowledge) with the docs read from
- * --site-dir. Same hash and one status pass shows every entry indexed: the corpus is reused as-is and the
- * re-upload/indexing-wait is skipped (--rebuild forces a new corpus anyway). Same hash but entries
- * not indexed: treated like a different hash. Different hash: wireKnowledge builds a
+ * --site-dir. Same hash: the corpus is reused as-is and the re-upload is skipped (--rebuild forces a
+ * new corpus anyway), unless one status pass shows entries that finished with an error status.
+ * Entries that are merely still pending never trigger a rebuild; they raise an alert (see
+ * reportUnconfirmed). Different hash: wireKnowledge builds a
  * NEW corpus while the intellect keeps serving the old one, the intellect is repointed to the
  * new one, and only then is the old one deleted (see deleteKnowledge), so Nova's knowledge base
  * is never missing and repeated redeploys (e.g. from CI) never orphan a corpus. A failure before
  * the repoint removes the half-built new corpus and leaves the old one untouched. The docs hash
- * is stored on the new category only once the indexing poll confirms every entry indexed. A poll
- * that times out or ends with error-status entries still finishes the deploy (the new corpus is
- * live), then the run exits non-zero and, with no hash stored, the next run rebuilds the corpus.
+ * is stored on the new category right after the repoint, whatever the indexing poll found. A poll
+ * that times out only raises the alert and never fails the run or triggers a rebuild; error-status
+ * entries fail the run and make the next run rebuild. Indexing is always read live from
+ * kaltura.knowledge.entryStatus(), never from a stored marker.
  * Nothing about the corpus is written to disk; server/agent.json holds only the stable ids.
  *
  * Run:  AGENTIC_PARTNER_ID=… AGENTIC_ADMIN_SECRET=… node server/provision.mjs
@@ -44,8 +46,11 @@
  *       [--agent-id <existingAgentId>]        # update this agent in place, keep its widgetId
  *       [--rebuild]                           # with --reuse: build a new corpus even if the docs
  *                                             # hash is unchanged
- *       --verify-knowledge                    # read-only: exit non-zero unless the intellect in
- *                                             # server/agent.json links a fully indexed corpus
+ *       --verify-knowledge                    # read-only: wait for indexing, then exit non-zero
+ *                                             # unless the intellect in server/agent.json links
+ *                                             # a fully indexed corpus
+ *       [--index-wait-minutes <n>]            # with --verify-knowledge: how long to wait for
+ *                                             # indexing (default 45)
  *       --digest-plan                         # read-only: show what --digest would create or update
  *       --digest                              # create/update the conversation digest objects
  *                                             # (server/digest.mjs) and record their ids
@@ -662,37 +667,30 @@ async function provisionSteps(ctx) {
   // commit back. The docs are read fresh from --site-dir every run, but a redeploy is often
   // triggered (manually, or by an unrelated provision.mjs change) with no change to the site's
   // own content. When the fingerprint stored on the live category matches, the existing
-  // category/record/entries are already correct and indexed, so the re-upload/indexing-wait
-  // below is skipped entirely.
+  // category/record/entries are already the right ones, so the re-upload and indexing wait
+  // below are skipped entirely.
   // A discovery failure is deliberately fatal here: it happens before any write, and
   // proceeding blind would upload a second corpus while orphaning the one still linked.
   const live = reuseConfigId ? await discoverKnowledge(admin, reuseConfigId) : null;
-  let knowledgeUnchanged = !!live && !forceRebuild && live.docsHash === docsHash;
-  // The hash is stored only after an indexing poll confirmed the corpus, but a matching hash is
-  // not enough to skip the work: one status pass must still show every entry indexed.
-  if (knowledgeUnchanged) {
-    const problem = indexProblem(await pollEntryStatus(admin, live.recordIds[0], live.entryIds, 0));
-    if (problem) {
-      console.log(`… docs hash matches but the live corpus is not fully indexed (${problem}), rebuilding`);
-      knowledgeUnchanged = false;
-    }
-  }
+  const knowledgeUnchanged = await canReuseCorpus(live, docsHash, forceRebuild, {
+    checkStatus: () => pollEntryStatus(admin, live.recordIds[0], live.entryIds, 0),
+  });
 
-  let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds, indexed;
+  let knowledgeCategoryId, knowledgeRecordId, knowledgeEntryIds;
   // Lets redeploy.yml skip the eval on a scheduled or dispatched run that changed nothing.
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `kb-rebuilt=${!knowledgeUnchanged}\n`);
   const problems = []; // what makes this run exit non-zero once the deploy itself is finished
   let newCorpus = null; // set only when this run builds a corpus
   // The indexer works in batch passes: an entry is usually searchable 15 to 30 minutes after it
-  // was uploaded, and entries uploaded early finish while later ones are still uploading. So this
-  // wait only covers the tail. With upload (~20 min), the wait and the old corpus's teardown
-  // (~5 min) the slow path stays well inside redeploy.yml's 60 minute job budget.
+  // was uploaded, and entries uploaded early finish while later ones are still uploading. This
+  // wait is for the log and the alert only. It never gates the deploy. With upload (~20 min), the
+  // wait and the old corpus's teardown (~5 min) the slow path stays well inside redeploy.yml's
+  // 60 minute job budget.
   const INDEX_WAIT_MS = 25 * 60_000;
   if (knowledgeUnchanged) {
     [knowledgeRecordId] = live.recordIds;
     [knowledgeCategoryId] = live.categoryIds;
     knowledgeEntryIds = live.entryIds;
-    indexed = true;
     console.log(`✓ docs unchanged since last deploy (hash ${docsHash.slice(0, 12)}…) — reusing knowledge category ${knowledgeCategoryId}/record ${knowledgeRecordId}, skipping re-upload/indexing poll`);
   } else {
     // Build the new corpus next to the live one. The intellect still serves the old corpus until
@@ -713,29 +711,30 @@ async function provisionSteps(ctx) {
     };
     ({ categoryId: knowledgeCategoryId, recordId: knowledgeRecordId, entryIds: knowledgeEntryIds } = await wireKnowledge(admin, docs, manifest, newCorpus));
 
-    // Resolve use_knowledge_base's final value BEFORE the intellect is ever created/updated, and
-    // send it in that single add/update call alongside knowledge_ids — never as a follow-up
-    // setCapability patch. This SDK's own docs (CLIENT-COMMANDS.md "Gotcha 2") say partner config
-    // is cached ~24h server-side and a capability flip on an EXISTING intellect won't reach
-    // converse time until that cache expires; a two-step create/update-then-setCapability sequence
-    // additionally risks the cache latching onto the transient 'off' value written in step one
-    // instead of ever seeing step two's 'on'. Polling first and writing once removes that race for
-    // a fresh create (no cache entry yet, so the single write lands immediately) — a `--reuse`
-    // redeploy of an intellect the runtime has already cached is still subject to that ~24h delay
-    // regardless of how the write is sequenced; that part is a platform limitation, not something
-    // this file can work around.
+    // use_knowledge_base is sent as 'on' in the SAME add/update call as knowledge_ids, never as a
+    // follow-up setCapability patch. This SDK's own docs (CLIENT-COMMANDS.md "Gotcha 2") say
+    // partner config is cached ~24h server-side and a capability flip on an EXISTING intellect
+    // won't reach converse time until that cache expires; a two-step
+    // create/update-then-setCapability sequence additionally risks the cache latching onto the
+    // transient 'off' value written in step one instead of ever seeing step two's 'on'. Writing
+    // once removes that race for a fresh create (no cache entry yet, so the single write lands
+    // immediately) — a `--reuse` redeploy of an intellect the runtime has already cached is still
+    // subject to that ~24h delay regardless of how the write is sequenced; that part is a
+    // platform limitation, not something this file can work around.
     // kaltura.knowledge.isIndexed() reads the knowledge record's own container-lifecycle
     // status ('READY'/'DELETED') — it reads READY the instant the record exists, before any
-    // of the entries just uploaded have actually finished indexing, so polling it here never
-    // tells us anything more on a later attempt than it did on the first. The real per-entry
-    // signal, kaltura.knowledge.entryStatus(), is the correct, officially supported completion
-    // check. It omits an entry until the indexer picks it up, then reports a per-document
-    // `status`: null while queued, a final value once finished (see entryIndexState).
+    // of the entries just uploaded have actually finished indexing. The real per-entry
+    // signal, kaltura.knowledge.entryStatus(), omits an entry until the indexer picks it up, then
+    // reports a per-document `status`: null while queued, a final value once finished (see
+    // entryIndexState).
     console.log(`… polling knowledge record ${knowledgeRecordId} for indexing completion (up to ${INDEX_WAIT_MS / 60_000} min)`);
+    const waitStartedAt = Date.now();
     const tally = await pollEntryStatus(admin, knowledgeRecordId, knowledgeEntryIds, INDEX_WAIT_MS);
-    indexed = true; // a slow or failed index never turns RAG off, but it does fail the run below
-    const problem = await storeHashIfIndexed(tally, () => storeDocsHash(admin, knowledgeCategoryId, docsHash));
-    if (problem) problems.push(`knowledge corpus not confirmed indexed (${problem}); no docs hash stored, so the next run rebuilds it`);
+    // Slow indexing is an alert, never a failure. Entries that finished with an error status are
+    // a real problem, and the next run rebuilds the corpus because it reads them live.
+    reportUnconfirmed(tally, knowledgeEntryIds.length, Date.now() - waitStartedAt);
+    const failedProblem = failedEntriesProblem(tally);
+    if (failedProblem) problems.push(failedProblem);
   }
 
   const existingTools = await kaltura.tools.list(admin).all();
@@ -808,11 +807,9 @@ async function provisionSteps(ctx) {
     capabilities: {
       avatar: 'on',
       avatar_filler: 'off',
-      // Resolved above, before this intellect is created/updated, by polling
-      // kaltura.knowledge.entryStatus() for indexing completion — see the
-      // comment above that poll for why this is set here, in the same write,
-      // rather than via a follow-up setCapability call.
-      use_knowledge_base: indexed ? 'on' : 'off',
+      // Set here, in the same write as knowledge_ids. See the comment above the
+      // indexing poll for why it is never a follow-up setCapability call.
+      use_knowledge_base: 'on',
       use_content_search: 'disabled',
       use_get_entry_content: 'disabled',
       use_related_files: 'disabled',
@@ -874,11 +871,16 @@ async function provisionSteps(ctx) {
     console.log('✓ created intellect', configId);
   }
   ctx.undo = null; // the intellect serves the new corpus now, so it must never be rolled back
-  // The outgoing corpus is safe to delete.
-  if (live && newCorpus) {
-    console.log(`✓ removing previous knowledge corpus entries (category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries; the unlinked record ${live.recordIds.join(',') || 'none'} is left in place)`);
-    const leftovers = await deleteKnowledge(admin, live);
-    if (leftovers.length) problems.push(`${leftovers.length} delete call(s) for the previous corpus failed, so its entries or category may be orphaned`);
+  if (newCorpus) {
+    problems.push(...await sealNewCorpus({
+      storeHash: () => storeDocsHash(admin, knowledgeCategoryId, docsHash),
+      // The outgoing corpus is safe to delete.
+      removePrevious: live && (async () => {
+        console.log(`✓ removing previous knowledge corpus entries (category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries; the unlinked record ${live.recordIds.join(',') || 'none'} is left in place)`);
+        const leftovers = await deleteKnowledge(admin, live);
+        return leftovers.length ? [`${leftovers.length} delete call(s) for the previous corpus failed, so its entries or category may be orphaned`] : [];
+      }),
+    }));
   }
 
   let avatar;
@@ -949,7 +951,7 @@ async function provisionSteps(ctx) {
   if (problems.length) throw new Error(`deploy finished, but: ${problems.join('; ')}`);
   console.log(knowledgeUnchanged
     ? `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, reused as-is (docs unchanged, no re-upload/wait needed).`
-    : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, after polling kaltura.knowledge.entryStatus() for indexing completion (budget ${INDEX_WAIT_MS / 60_000} min).`);
+    : `\n✅ knowledge base ACTIVE (use_knowledge_base:'on') — category ${knowledgeCategoryId}, record ${knowledgeRecordId}, docs hash stored (indexing wait budget ${INDEX_WAIT_MS / 60_000} min).`);
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -1004,7 +1006,7 @@ export function entryIndexState(row) {
 /** Poll kaltura.knowledge.entryStatus() until every entry has finished indexing, or budgetMs runs
  * out. Never throws and never gates the deploy by itself: a slow indexer and a flaky status call
  * are logged, and entries that finished with an error status are named so a bad chunk does not
- * pass as indexed. Callers turn the returned tally into a verdict with `indexProblem`.
+ * pass as indexed. Callers decide what the returned tally means.
  * `fetchStatus`, `wait`, `now` and `log` are injectable for tests. */
 export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budgetMs, {
   fetchStatus = (ids) => kaltura.knowledge.entryStatus(knowledgeRecordId, ids, admin),
@@ -1044,18 +1046,48 @@ export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budget
   return { indexed: entryIds.length - pending.size - failed.size, failed: [...failed.keys()], pending: [...pending] };
 }
 
-/** Why a poll tally is not a clean pass, or null when every entry is confirmed indexed. */
-export function indexProblem({ failed, pending }) {
-  if (!failed.length && !pending.length) return null;
-  return [failed.length && `${failed.length} with an error status`, pending.length && `${pending.length} not confirmed indexed`].filter(Boolean).join(', ');
+/** Alert that some entries are not confirmed indexed yet. Slow indexing is never a failure and
+ * never a reason to rebuild, so this only prints a GitHub Actions `::warning::` annotation and, when
+ * `$GITHUB_STEP_SUMMARY` is set, adds a line to the job summary. Returns the message, or null when
+ * nothing is pending. `env`, `log` and `appendSummary` are injectable for tests. */
+export function reportUnconfirmed({ pending }, total, waitedMs, {
+  env = process.env, log = console.log, appendSummary = appendFileSync,
+} = {}) {
+  if (!pending.length) return null;
+  const message = `${pending.length} of ${total} knowledge entries are not confirmed indexed yet (waited ${Math.round(waitedMs / 60_000)} min). Nothing was rebuilt. Check again later with --verify-knowledge.`;
+  log(`::warning::${message}`);
+  if (env.GITHUB_STEP_SUMMARY) appendSummary(env.GITHUB_STEP_SUMMARY, `- :warning: ${message}\n`);
+  return message;
 }
 
-/** Run `store` (the docs hash write) only when the poll `tally` is clean. Returns the problem
- * text, or null after storing. */
-export async function storeHashIfIndexed(tally, store) {
-  const problem = indexProblem(tally);
-  if (!problem) await store();
-  return problem;
+/** The run-failing problem for entries that finished indexing with an error status, or null. */
+export function failedEntriesProblem({ failed }) {
+  return failed.length ? `${failed.length} knowledge entries finished indexing with an error status, so the next run rebuilds the corpus` : null;
+}
+
+/** Whether a `--reuse` run keeps the live corpus. It is kept when its stored docs hash matches and
+ * no rebuild was forced, unless one status pass (`checkStatus`) shows entries that finished with an
+ * error status. Entries that are merely still pending only raise the alert. */
+export async function canReuseCorpus(live, docsHash, forceRebuild, { checkStatus, report = reportUnconfirmed, log = console.log } = {}) {
+  if (!live || forceRebuild || live.docsHash !== docsHash) return false;
+  const tally = await checkStatus();
+  if (tally.failed.length) {
+    log(`… docs hash matches but ${tally.failed.length} entries of the live corpus finished indexing with an error status, rebuilding`);
+    return false;
+  }
+  report(tally, live.entryIds.length, 0);
+  return true;
+}
+
+/** The steps right after the intellect points at the new corpus. The docs hash is stored first,
+ * whatever indexing has done so far, because indexing is read live and never from a marker. Then
+ * the outgoing corpus is removed (`removePrevious` returns its problems). A failed hash write does
+ * not stop the removal. Returns the problems that make the run exit non-zero. */
+export async function sealNewCorpus({ storeHash, removePrevious }) {
+  const problems = [];
+  await storeHash().catch((e) => problems.push(`docs hash not stored (${e.code || e.message}), so the next run rebuilds the corpus`));
+  if (removePrevious) problems.push(...await removePrevious());
+  return problems;
 }
 
 /**
@@ -1066,12 +1098,10 @@ export async function storeHashIfIndexed(tally, store) {
  * KalturaMarkdownAsset directly — no PDF conversion, no pandoc). Front matter
  * is stripped first since it's Eleventy build metadata, not doc content.
  * `use_knowledge_base` only goes `'on'` in the SAME add/update call as `knowledge_ids` — never a
- * follow-up patch — because provision() polls this record's indexing status (see the poll loop
- * right after this call returns) and resolves `capabilities.use_knowledge_base` BEFORE the
- * intellect is ever created/updated.
- * It does not store the docs hash: `storeDocsHash` does, only once the indexing poll confirmed
- * every entry, so a run that dies mid-upload or ends with unindexed entries leaves a category
- * with no hash and the next --reuse run replaces it.
+ * follow-up patch.
+ * It does not store the docs hash: `storeDocsHash` does, once the intellect points at the new
+ * corpus, so a run that dies mid-upload leaves a category with no hash and the next --reuse run
+ * replaces it.
  * Every id it creates is also pushed into `created` as it goes, so a caller can remove a
  * half-built corpus when this throws.
  */
@@ -1110,7 +1140,8 @@ async function wireKnowledge(admin, docs, manifest, created = { recordIds: [], c
 }
 
 /** Store the docs fingerprint on the knowledge category (`referenceId`). The next --reuse run
- * trusts it as proof that the corpus was fully uploaded and indexed. */
+ * trusts it as proof that the corpus was fully uploaded and is the one the intellect serves.
+ * It says nothing about indexing, which is always read live. */
 async function storeDocsHash(admin, categoryId, docsHash) {
   await ovp(admin, 'category', 'update', { id: categoryId, category: { objectType: 'KalturaCategory', referenceId: docsHash } });
   console.log(`✓ stored docs hash ${docsHash.slice(0, 12)}… on category ${categoryId}`);
@@ -1238,26 +1269,50 @@ export async function deleteKnowledge(admin, { categoryIds = [], entryIds = [] }
   return failures;
 }
 
-/** Why the live corpus is not a confirmed, fully indexed one, or null when it is. `live` is
- * discoverKnowledge's result and `tally` is pollEntryStatus's. A docs hash is stored only after a
- * deploy confirmed indexing, so a missing hash means the last deploy did not. */
-export function knowledgeProblem(live, tally) {
+export const VERIFY_WAIT_DEFAULT_MIN = 45;
+
+/** Why the live corpus can't be checked at all, or null. `live` is discoverKnowledge's result. The
+ * docs hash is stored once a deploy has uploaded the corpus and pointed the intellect at it, so a
+ * missing hash means the last deploy did not get that far. */
+export function knowledgeProblem(live) {
   if (!live?.recordIds.length) return 'the intellect links no knowledge record';
-  if (!live.docsHash) return 'the knowledge category has no docs hash, so the last deploy did not confirm indexing';
-  return indexProblem(tally);
+  if (!live.docsHash) return 'the knowledge category has no docs hash, so the last deploy did not finish uploading';
+  return null;
 }
 
-/** `--verify-knowledge`: read-only. Throws unless the intellect in server/agent.json links a
- * corpus that a deploy confirmed and whose entries are all indexed right now. */
-async function verifyKnowledge() {
+/** Waits up to `budgetMs` for every entry of the live corpus to finish indexing, then throws unless
+ * they all did without an error status. Running out of budget throws the "indexing not finished"
+ * message and rebuilds nothing. `poll(recordId, entryIds, budgetMs)` is pollEntryStatus's shape. */
+export async function waitForKnowledgeReady(live, budgetMs, poll) {
+  const problem = knowledgeProblem(live);
+  if (problem) throw new Error(`knowledge base not ready: ${problem}. Run Redeploy Nova with rebuild ticked.`);
+  const total = live.entryIds.length;
+  const { indexed, failed, pending } = await poll(live.recordIds[0], live.entryIds, budgetMs);
+  if (failed.length) throw new Error(`knowledge base not ready: ${failed.length} of ${total} entries finished indexing with an error status. Run Redeploy Nova with rebuild ticked.`);
+  if (pending.length) throw new Error(`indexing not finished after ${Math.round(budgetMs / 60_000)} min (${indexed} of ${total} entries); re-run the eval later, nothing was rebuilt`);
+  return total;
+}
+
+/** The `--index-wait-minutes` value in ms, or the default. Throws on anything but a positive number. */
+export function verifyWaitMs(args) {
+  const i = args.indexOf('--index-wait-minutes');
+  if (i === -1) return VERIFY_WAIT_DEFAULT_MIN * 60_000;
+  const minutes = Number(args[i + 1]);
+  if (!(minutes > 0)) throw new Error('--index-wait-minutes needs a positive number of minutes');
+  return minutes * 60_000;
+}
+
+/** `--verify-knowledge`: read-only. Waits for indexing (default 45 min, see `--index-wait-minutes`),
+ * then throws unless the intellect in server/agent.json links an uploaded corpus whose entries are
+ * all indexed right now. */
+async function verifyKnowledge(args) {
+  const budgetMs = verifyWaitMs(args);
   const saved = JSON.parse(await readFile(OUT, 'utf8').catch(() => '{}'));
   if (!saved.configId) throw new Error('server/agent.json has no configId to verify');
   const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision' });
   const live = await discoverKnowledge(admin, Number(saved.configId));
-  const tally = live?.recordIds.length ? await pollEntryStatus(admin, live.recordIds[0], live.entryIds, 0) : null;
-  const problem = knowledgeProblem(live, tally);
-  if (problem) throw new Error(`knowledge base not ready: ${problem}. Run Redeploy Nova with rebuild ticked.`);
-  console.log(`✓ knowledge base ready: ${live.entryIds.length} entries indexed`);
+  const total = await waitForKnowledgeReady(live, budgetMs, (recordId, entryIds, ms) => pollEntryStatus(admin, recordId, entryIds, ms));
+  console.log(`✓ knowledge base ready: ${total} entries indexed`);
 }
 
 /** `--digest` / `--digest-plan`: bring Nova's conversation digest objects in line with server/digest.mjs. */
@@ -1326,8 +1381,11 @@ const USAGE = `Usage: node server/provision.mjs [options]
   --agent-id <existingAgentId>          Update this agent in place, keep its widgetId
   --rebuild                             With --reuse: build a new knowledge corpus even if the
                                          docs hash is unchanged
-  --verify-knowledge                    Read-only: exit non-zero unless the intellect in
-                                         server/agent.json links a fully indexed corpus
+  --verify-knowledge                    Read-only: wait for indexing, then exit non-zero
+                                         unless the intellect in server/agent.json links a
+                                         fully indexed corpus
+  --index-wait-minutes <n>              With --verify-knowledge: how long to wait for
+                                         indexing (default ${VERIFY_WAIT_DEFAULT_MIN})
   --digest-plan                         Read-only: list the conversation digest objects this
                                          repo would create or update (names and ids only)
   --digest                              Create or update the conversation digest objects
@@ -1342,7 +1400,7 @@ const USAGE = `Usage: node server/provision.mjs [options]
                                          of ${CLEANUP_TARGETS.join(',')}
   --help                                Show this message and exit (no API calls made)`;
 
-const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--verify-knowledge', '--digest', '--digest-plan', '--cleanup', '--dry-run', '--only', '--help'];
+const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--verify-knowledge', '--index-wait-minutes', '--digest', '--digest-plan', '--cleanup', '--dry-run', '--only', '--help'];
 
 function main() {
   const args = stripSiteDirFlag(process.argv.slice(2));
@@ -1352,7 +1410,7 @@ function main() {
     console.error(`✗ unknown flag(s): ${unknown.join(', ')}\n\n${USAGE}`);
     process.exit(1);
   }
-  if (args.includes('--verify-knowledge')) return verifyKnowledge();
+  if (args.includes('--verify-knowledge')) return verifyKnowledge(args);
   if (args.includes('--digest') || args.includes('--digest-plan')) {
     const others = args.filter((a) => a.startsWith('--') && a !== '--digest' && a !== '--digest-plan');
     if (args.includes('--digest') && args.includes('--digest-plan')) {
