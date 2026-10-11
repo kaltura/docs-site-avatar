@@ -247,7 +247,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'I want a custom avatar face composed from parts instead of a template — do I need both a face and a background at creation time, or can I add the background later?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['both required', 'both need', 'required together', 'together at create', 'need both', 'must provide both', 'must pass both', 'both are required', 'requires both', 'both ids together', 'both of their ids', 'provided together', 'passed together', 'supplied together'],
+          relevanceAny: ['both required', 'both need', 'required together', 'together at create', 'need both', 'must provide both', 'must pass both', 'both are required', 'requires both', 'both ids together', 'both of their ids', 'provided together', 'passed together', 'supplied together', 'supply both', 'together at creation'],
           // Keywords alone also match the opposite answer ("you do not need both ..."), so name the wrong claims.
           relevanceNone: ['\\b(no|not|don.t|doesn.t|without)\\b[^.]{0,40}\\b(need|require[sd]?|have to|must)\\b[^.]{0,40}\\bboth\\b', '\\bcan (also )?(add|attach|supply|set)\\b[^.]{0,60}\\b(background|face)\\b[^.]{0,40}\\b(later|afterwards?|separately)\\b'],
         },
