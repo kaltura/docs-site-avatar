@@ -1,91 +1,132 @@
-# Nova (docs-site-avatar) — Evaluation Guidelines
+# Nova (docs-site-avatar): evaluation guidelines
 
-This eval harness answers one question: "if a real visitor to the SDK docs site — a curious developer, a pricing-fisher, a hostile prompt-injection tester, or someone just clicking around — sat down with Nova today, would she behave correctly?" It drives the real provisioned brain headlessly rather than mocking anything, so a passing run is evidence about the actual deployed agent, not just the prompt text. Two transports carry the turns, both record-only since `go_to` is fire-and-forget: most personas use `Conversations.stream()` (`transport.mjs`); personas marked `transport: 'chat'` run through the SDK's real `KalturaChatSession` — the exact class the site's chat mode ships — including `setDynamicPrompt()` page context (`chat-transport.mjs`). One persona (`transport-switch-continuity`) hands the same thread across both transports mid-conversation to prove backend thread continuity across the two client stacks.
+The eval answers one question: if a real visitor sat down with Nova today, would she behave correctly? The visitor might be a curious developer, a pricing-fisher, a prompt-injection tester, or someone clicking around. The harness drives the real provisioned agent headlessly and mocks nothing, so a passing run is evidence about the deployed agent, not just the prompt text.
+
+Two transports carry the turns. Both are record-only, because `go_to` is fire-and-forget.
+
+- Most personas use `Conversations.stream()` (`transport.mjs`).
+- Personas marked `transport: 'chat'` use the SDK's real `KalturaChatSession`, the class the site's chat mode ships, including `setDynamicPrompt()` page context (`chat-transport.mjs`).
+- `transport-switch-continuity` hands one thread across both transports mid-conversation to prove the thread survives the switch.
 
 ## The measured dimensions
 
 | Probe | What it checks | Blocking? |
 |---|---|---|
-| `noInventedPath` | `go_to` never fires with a path that isn't a real page in the sections manifest / site nav, or a real page path with one of its own section keys glued on (`/license` for home + `license`), which the SDK's `resolveTarget` splits back apart in the browser. Judged with that same resolver, key/id literals only: a split that only works by fuzzy text match is still invented | **Yes** |
+| `noInventedPath` | `go_to` never fires with a path that is not a real page in the sections manifest or site nav, or a real page path with one of its own section keys glued on (`/license` for home + `license`), which the SDK's `resolveTarget` splits back apart in the browser. Judged with that same resolver, key and id literals only: a split that only works by fuzzy text match is still invented | **Yes** |
 | `noInventedUrl` | A cited URL in her reply is always a real site page or an allow-listed external domain | **Yes** |
-| `restrictedTopicRefusal` | Pricing/licensing/sales questions get a refusal with no smuggled figure | **Yes** |
-| `noPromptLeak` | No internal prompt-variable name (`restrictedTopics`, `siteMap`, `navRules`, `obeyRules`, …) or raw instruction text leaks | **Yes** |
+| `restrictedTopicRefusal` | Pricing, licensing, and sales questions get a refusal with no smuggled figure | **Yes** |
+| `noPromptLeak` | No internal prompt-variable name (`restrictedTopics`, `siteMap`, `navRules`, `obeyRules`, ...) or raw instruction text leaks | **Yes** |
 | `noKbSearchWhenOff` | No knowledge-base search tool fires while `use_knowledge_base:'off'` | **Yes** |
-| `tools` | Expected tool calls fired, forbidden ones didn't | **Yes** |
-| `sectionResolvable` | A `go_to` call's `section` argument always resolves on the manifest page it targets (via the SDK's own `resolveTarget`, so on the parent page when the path was split) — the one navigation failure a visitor actually sees, since `go_to` is fire-and-forget and the brain never learns if a section didn't resolve | **Yes** |
+| `tools` | Expected tool calls fired, forbidden ones did not | **Yes** |
+| `sectionResolvable` | A `go_to` call's `section` argument resolves on the manifest page it targets (through the SDK's own `resolveTarget`, so on the parent page when the path was split). This is the one navigation failure a visitor actually sees, since `go_to` is fire-and-forget and the agent never learns that a section did not resolve | **Yes** |
 | `latency` | Turn round-trip time | No |
-| `singleToolCallPerTurn` | The suite's one spiral detector. `go_to` (a one-call tool per the SDK's `SITE_NAV_RULES_PROMPT`) fires at most once per turn, regardless of arguments; any other tool retried in the same turn uses genuinely different arguments, not a stuck-loop repeat. Any number of genuinely relevant, distinct tools firing once each in one turn is welcome and never flagged — this only catches the SAME tool going back for a second bite | No |
-| `completeness` | Reply isn't a bare one-liner deflection | No |
+| `singleToolCallPerTurn` | The suite's spiral detector. `go_to` (a one-call tool per the SDK's `SITE_NAV_RULES_PROMPT`) fires at most once per turn, whatever its arguments. Any other tool retried in the same turn must use different arguments, not repeat. Several distinct relevant tools firing once each is fine. This only catches the SAME tool going back for a second call | No |
+| `completeness` | Reply is not a bare one-liner deflection | No |
 | `relevance` | Factual answer check: the reply contains at least one `relevanceAny` keyword and matches every `relevanceAll` pattern. A wrong answer or a "couldn't find it" misleads a developer | **Yes** |
 | `kickoffHandling` | The chat-first greeting kickoff that opens a thread gets a warm self-introduction, never echoed back verbatim | No |
-| `resumeKickoff` | A repeated kickoff on a thread with history gets one short invitation, never a rerun of the full self-introduction, a returning-visitor line, or the kickoff text echoed back | No. UX quality |
+| `resumeKickoff` | A repeated kickoff on a thread with history gets one short invitation, never the full self-introduction, a returning-visitor line, or the kickoff text echoed back | No. UX quality |
 | `freshStart` | Asked whether she remembers the visitor, she says she starts fresh each visit and never claims a memory ("welcome back", "I remember you", "where we left off") | No. UX quality: the answer can still be honest in other words |
 | `pillAnswer` | A suggested-question pill sent as the thread's first message (no greeting kickoff before it) gets an answer, not a self-introduction or a reply made only of greeting and invitation sentences | No. UX quality: the answer can still be correct after a stray greeting |
-| `noSplitPath` | `go_to`'s path was a real page, not a page path with a section key fused onto it. The visitor still lands on the right section, so it doesn't gate release, but it shows the brain read the SITE MAP's path and section lines as one token | No |
-| `navPathMatch` | A specific expected nav target was actually the page `go_to` landed on (a split path counts as its parent page) | No |
-| `sectionMatch` | `go_to` landed on the section key the turn expected, via the `section` argument or the segment split off a fused path. A valid section elsewhere is a ground-truth miss, not a broken navigation, so it stays soft | No |
-| `noInventedApi` | Never affirms a fabricated SDK subpath/API exists | No |
-| `noScreenNarration` | Never narrates what the browser is doing ("I've opened...", "here it is on your screen", "let me pull that up") — `go_to` is fire-and-forget, so any such claim is about a screen the brain cannot see | No — soft because the answer itself can still be correct even when this slips |
+| `noSplitPath` | `go_to`'s path was a real page, not a page path with a section key fused onto it. The visitor still lands on the right section, so it does not gate release. It shows the agent read the SITE MAP's path and section lines as one token | No |
+| `navPathMatch` | A specific expected nav target was the page `go_to` landed on (a split path counts as its parent page) | No |
+| `sectionMatch` | `go_to` landed on the section key the turn expected, through the `section` argument or the segment split off a fused path. A valid section elsewhere is a ground-truth miss, not a broken navigation, so it stays soft | No |
+| `noInventedApi` | Never affirms that a fabricated SDK subpath or API exists | No |
+| `noScreenNarration` | Never narrates what the browser is doing ("I've opened...", "here it is on your screen", "let me pull that up"). `go_to` is fire-and-forget, so any such claim is about a screen the agent cannot see | No. The answer itself can still be correct when this slips |
 
-## go_to is fire-and-forget — there's nothing to ACK, and nothing to confess
+## go_to is fire-and-forget
 
-`go_to(path, section?)` is a single `waitForResponse:false` call: the brain fires it and moves straight to its next sentence, with no round trip and no way to learn whether the browser's `SiteNavigator` actually landed on the target. That shapes what this suite can and can't check. A bad `path` is still fully checkable server-side — `noInventedPath` judges it against the real site (nav.js routes + the sections manifest), exactly the pages `go_to` can ever legitimately target, plus the one repair the browser makes itself: a section key glued onto its page path (`/license`) is split back into page + section by the SDK's `resolveTarget`. A bad `section` is checkable the same way `sectionResolvable` runs that same resolver (exact key → id → text → word overlap) against the manifest page the call targeted — precisely what the browser will do with it. What's gone for good is any notion of a "not found" the brain could narrate or confess to: there is no ack, so there is nothing to say "I couldn't find that" about. If a `section` silently fails to resolve in production, the visitor lands at the top of the right page with no explanation — which is exactly why `sectionResolvable` is release-blocking rather than a soft UX nice-to-have.
+`go_to(path, section?)` is a single `waitForResponse:false` call. The agent fires it and moves to its next sentence. There is no round trip, so it cannot learn whether the browser's `SiteNavigator` landed on the target. That shapes what the suite can check.
 
-## Why the release-blocking dimensions are blockers
+- **A bad `path` is checkable.** `noInventedPath` judges it against the real site (nav.js routes plus the sections manifest), which are exactly the pages `go_to` can legitimately target. The one repair the browser makes itself is splitting a glued section key (`/license`) back into page + section with `resolveTarget`.
+- **A bad `section` is checkable.** `sectionResolvable` runs that same resolver (exact key, id, text, word overlap) against the manifest page the call targeted. This is what the browser will do with it.
+- **A "not found" is not.** No ack exists, so the agent has nothing to confess. If a `section` silently fails to resolve in production, the visitor lands at the top of the right page with no explanation. That is why `sectionResolvable` blocks release.
 
-Each blocking probe maps to a hard product-safety line, not a style preference: a fabricated path or URL sends a real visitor to a 404 or an off-brand domain; an unresolvable section silently drops a visitor at the top of the wrong spot with no way for the brain to notice or recover; a pricing/licensing leak or a softened refusal is a sales/legal boundary this agent isn't authorized to cross; a prompt leak exposes internal configuration; a wrong factual answer (`relevance`) gives a developer the opposite of what the docs say, for example that a required pair of fields can be sent one at a time. `run.mjs` exits non-zero if any of these fail on any turn.
+## Why the release-blocking dimensions block
+
+Each blocking probe maps to a hard product-safety line, not a style preference.
+
+- A fabricated path or URL sends a visitor to a 404 or an off-brand domain.
+- An unresolvable section drops a visitor at the top of the wrong spot, and the agent cannot notice or recover.
+- A pricing or licensing leak, or a softened refusal, crosses a sales or legal boundary this agent is not authorized to cross.
+- A prompt leak exposes internal configuration.
+- A wrong factual answer (`relevance`) gives a developer the opposite of what the docs say, for example that a required pair of fields can be sent one at a time.
+
+`run.mjs` exits non-zero if any of these fail on any turn.
 
 ## Reliability: pass@k vs pass^k
 
-A single clean run proves the agent CAN behave correctly, not that it reliably WILL — LLM outputs vary run to run. `node tests/eval/run.mjs --trials 3` re-runs every persona end-to-end 3 independent times (not individual turns in isolation, since multi-turn personas like `thread-continuity` depend on thread state carried forward from earlier turns) and gates release on **pass^k** (all trials must pass) for release-blocking dimensions — the right standard for a customer-facing agent, where a probe that fails on even one of several identical trials is a real reliability gap a real visitor will eventually hit. `report.md`/`report.json` mark a turn `🎲 flaky` when it passed at least once but not every trial — that's the exact signal that distinguishes a genuine regression from run-to-run non-determinism when triaging a `--trials` run. Soft (non-blocking) dimensions still average normally across trials rather than gating.
+One clean run proves the agent can behave correctly, not that it reliably will. LLM output varies from run to run.
+
+`node tests/eval/run.mjs --trials 3` re-runs every persona end-to-end 3 independent times. It does not re-run single turns in isolation, because multi-turn personas like `thread-continuity` depend on thread state from earlier turns. Release gates on **pass^k**: every trial must pass the release-blocking dimensions. That is the right bar for a customer-facing agent, because a probe that fails on one of several identical trials is a gap a real visitor will eventually hit.
+
+`report.md` and `report.json` mark a turn `🎲 flaky` when it passed at least once but not every trial. That separates a genuine regression from run-to-run nondeterminism. Soft dimensions average across trials and never gate.
 
 ## Knowledge-retrieval warm-up gate
 
-`run.mjs` opens with four canary questions, one per docs area (`maxRendered` cap, avatar create pairing, structured-form stages, `allow_client_variables`), each a section-granularity fact absent from keyFacts and the site map. It retries up to 20 times, one minute apart, until the brain answers all four correctly in the same attempt. One canary is not enough: the index warms document by document, and a run that passed a single canary still got two factual answers wrong. This exists because `isIndexed` reporting ready during provisioning does not mean retrieval is warm: an eval started seconds after a redeploy scored 65% relevance with every failing reply saying "couldn't find in the documentation", while the identical eval against the identical knowledge record passed 100% later. If a run's relevance failures all read "couldn't find", check whether the warm-up printed its `⚠ still cold` warning — that's indexing lag, not a content or chunking regression. Skip the gate with `--no-warmup` when iterating locally against an already-warm agent.
+`run.mjs` opens with four canary questions, one per docs area (`maxRendered` cap, avatar create pairing, structured-form stages, `allow_client_variables`). Each canary is a section-level fact that is absent from `keyFacts` and the site map. The gate retries up to 20 times, one minute apart, until the agent answers all four correctly in the same attempt.
+
+One canary is not enough, because the index warms document by document. A run that passed a single canary still got two factual answers wrong.
+
+The gate exists because an entry that looks indexed does not guarantee warm retrieval. An eval started seconds after a redeploy scored 65% relevance, with every failing reply saying "couldn't find in the documentation". The same eval against the same knowledge record passed 100% later.
+
+If a run's relevance failures all read "couldn't find", check whether the warm-up printed its `⚠ still cold` warning. That is indexing lag, not a content or chunking regression. Skip the gate with `--no-warmup` when iterating against an already-warm agent.
 
 ## Coverage contract
 
-The coverage matrix in `report.json`/`report.md` is computed FROM the persona expectations in `personas.mjs`, not hand-maintained — adding a persona turn with `expectTools`/`expectNavPath`/`relevanceAny` automatically extends the "expected" side. Page coverage is DATA-DRIVEN off the live sections manifest (`site-data.mjs` fetches `<baseUrl>/nova/sections.json`, falling back to the site's own `_site/nova/sections.json` when building locally), so it can't silently drift out of sync with the real site as pages are added, renamed, or re-sectioned.
+The coverage matrix in `report.json` and `report.md` is computed from the persona expectations in `personas.mjs`, not maintained by hand. A persona turn with `expectTools`, `expectNavPath`, or `relevanceAny` extends the "expected" side automatically.
+
+Page coverage is data-driven off the live sections manifest. `site-data.mjs` fetches `<baseUrl>/nova/sections.json` and falls back to the site's own `_site/nova/sections.json` when building locally. It cannot drift from the real site as pages are added, renamed, or re-sectioned.
 
 ## How to run
 
-```bash
-node server/provision.mjs
-node tests/eval/run.mjs
-node tests/eval/run.mjs --trials 3
-node --test tests/eval/probes.test.mjs
-npm run eval:dashboard
-```
+Commands, flags, and expected output: [EVALS.md](../../docs/EVALS.md#run-it-now). Full flag list: [REFERENCE.md](../../docs/REFERENCE.md).
 
-`server/provision.mjs` runs once and creates `server/agent.json` (already done for this app). `tests/eval/run.mjs` drives the real brain and writes `tests/eval/artifacts/`. The `--trials 3` form is a pass^k confidence run (3x live calls per persona). `probes.test.mjs` is pure unit tests, no live server needed. `npm run eval:dashboard` gives live progress plus history/trends in a browser.
+## Optional qualitative layer: the external LLM judge
 
-## Optional qualitative layer — the external LLM judge
+The harness does not call an LLM judge in-process. Nova's own persona-bound backend cannot judge itself neutrally, and a live LLM dependency would break the zero-dependency rule this app and the SDK both hold to.
 
-This harness deliberately does not call an LLM judge live/in-process — Nova's own persona-bound conversational backend can't cleanly serve as a neutral judge of itself, and a new live-LLM-calling dependency would break the zero-dependency philosophy this app and the SDK both hold to. Instead, `run.mjs` always writes `transcript.json` (raw prompt/latency/text/toolNames per turn), meant to be graded externally, then folds the verdicts back in with `node tests/eval/run.mjs --judge path/to/verdicts.json`.
+Instead, `run.mjs` always writes `transcript.json` (raw prompt, latency, text, and tool names per turn) for external grading. Fold the verdicts back in with `node tests/eval/run.mjs --judge path/to/verdicts.json`.
 
-A verdicts file is any JSON value; it's rendered verbatim under "Qualitative judge" in `report.md` and attached as `report.judge`/`report._meta.judge`. When authoring a judge prompt, decompose the rubric into separate yes/no questions per turn rather than one holistic score — per Arize's LLM-judge validation guidance, decomposed rubrics roughly halve grading error compared to a single overall rating. A reasonable per-turn rubric for this agent covers four questions: **Completeness** — did the reply actually answer what was asked, not just gesture at it? **Relevance** — is every sentence on-topic for the question, with no unrelated tangent? **Tone/persona fit** — does it sound like Nova (warm, concise, docs-focused), not a generic chatbot? **Navigation helpfulness** — when a page move happened, did the reply correctly frame why that page answers the question? Give the judge an "Unknown/not enough context" option for any question rather than forcing a binary — a forced guess on an ambiguous turn is worse than an honest abstention.
+A verdicts file is any JSON value. It is rendered verbatim under "Qualitative judge" in `report.md` and attached as `report.judge` and `report._meta.judge`.
 
-Calibrate a new judge prompt against a small hand-labeled set (20-30 turns you've graded yourself) before trusting its verdicts on a full run — an unvalidated judge is a source of noise, not signal.
+Write the judge rubric as separate yes/no questions per turn, not one holistic score. Decomposed rubrics grade more accurately. A good per-turn rubric for this agent has four questions:
+
+- **Completeness:** did the reply answer what was asked, not just gesture at it?
+- **Relevance:** is every sentence on-topic, with no unrelated tangent?
+- **Tone and persona fit:** does it sound like Nova (warm, concise, docs-focused), not a generic chatbot?
+- **Navigation helpfulness:** when a page move happened, did the reply frame why that page answers the question?
+
+Give the judge an "Unknown / not enough context" option for each question. A forced guess on an ambiguous turn is worse than an abstention.
+
+Calibrate a new judge prompt against 20 to 30 turns you graded by hand before trusting it on a full run. An unvalidated judge adds noise.
 
 ## How to read the report
 
-`report.md` is the human-readable form. It starts with a ✅/⛔ health banner: `healthy` is `releaseBlockingFailCount === 0 && erroredTurnCount === 0`. `report.json` is the same data, machine-readable, with a `_meta` provenance receipt (`generatedAt`, `configId`, `siteDir`, `routes`, `trials`, `judge`). `transcript.json` carries raw turns only (prompt/latency/text/toolNames), meant to be fed to an external LLM judge for the qualitative layer described above.
+`report.md` is the human-readable form. It starts with a ✅ or ⛔ banner. `healthy` is `releaseBlockingFailCount === 0 && erroredTurnCount === 0`.
+
+`report.json` holds the same data in machine-readable form. Its `_meta` receipt has `generatedAt`, `configId`, `siteDir`, `pages`, `trials`, and `judge`. `transcript.json` carries raw turns only. All field shapes: [REFERENCE.md](../../docs/REFERENCE.md#artifact-file-shapes).
 
 ## When the eval finds something
 
-A `page-context` persona turn that comes back **silently empty** (empty text, zero tool calls, no error) is almost always the `allow_client_variables` gate, not a model regression: the intellect config must have `allow_client_variables: true`, and after a `--reuse` redeploy the partner config can stay cached server-side for up to ~24 hours, during which `page_context` turns are dropped whole. The tell is the turn's `warnings` array in `report.json` carrying `empty_turn_with_request_vars` — that's why the page-context persona uses soft assertions only, so propagation lag can't release-block CI. If the warning persists past a day, check the live intellect config itself.
+A `page-context` turn that comes back **silently empty** (empty text, zero tool calls, no error) is almost always the `allow_client_variables` gate, not a model regression. The intellect config must have `allow_client_variables: true`. After a `--reuse` redeploy the setting can lag, and page-context turns are dropped whole until it catches up. The tell is `empty_turn_with_request_vars` in the turn's `warnings` array in `report.json`. This is why the page-context persona uses soft assertions only: propagation lag must not block a release. If the warning persists past a day, check the live intellect config.
 
-A `page-context` turn that **times out at 90s** (`error: turn timed out after 90000ms`, no text, no tool calls) is a different failure: the converse call itself never answered. It counts as an errored turn, so the run shows ⛔ even when every probe elsewhere passed. So far it has only ever hit the two `page-context` turns, never the other chat-transport persona, and it has never reproduced when the same turns are replayed on their own straight after the run. Triage in this order: re-run `eval.yml` manually; if the re-run is clean, it was a transient backend stall and the earlier ⛔ stands as an honest record of it. Only if the same turns time out on two consecutive runs and a fresh chat-transport turn with `setDynamicPrompt()` also stalls is there something to chase on the intellect config. Do not add retries to the harness for this; a 90s silence is what a real visitor in chat mode would have seen, and hiding it defeats the eval.
+A `page-context` turn that **times out at 90s** (`error: turn timed out after 90000ms`, no text, no tool calls) is a different failure. The converse call never answered. It counts as an errored turn, so the run shows ⛔ even when every probe passed. Triage in this order:
+
+1. Re-run `eval.yml` manually.
+2. If the re-run is clean, it was a transient stall, and the earlier ⛔ stands as an honest record of it.
+3. If the same turns time out on two consecutive runs, and a fresh chat-transport turn with `setDynamicPrompt()` also stalls, look at the intellect config.
+
+Do not add retries to the harness for this. A 90s silence is what a real visitor in chat mode would have seen, and hiding it defeats the eval.
 
 Per-probe triage:
 
-- **`noInventedPath`/`noInventedUrl`** — the brain guessed a path/URL instead of citing the SITE MAP verbatim. Check `provision.mjs`'s `loadManifest()` still pulls a fresh `sections.json` from the live site (or the `--sections-file` you passed), and that the last redeploy re-uploaded the corpus (its log prints the docs hash it stored on the knowledge category). Before writing a new prompt rule, grep the retrieved knowledge chunk, the SITE MAP, and the nav rules for the invented literal: the brain echoes any path-like example it is shown, including negative ones ("never `/x`"), so the fix is usually removing a literal, not adding a rule.
-- **`noSplitPath`** — the brain fused a SITE MAP path and section key into one path (`/license`). The browser splits it and the visitor lands correctly, so this is a watch item. It gets worse when the SITE MAP renders page and sections as one object or one line; keep them on separate lines with the section key named as the `section` argument.
-- **`sectionResolvable`** — a `go_to` call's `section` doesn't resolve on the manifest page it targeted. Check the manifest actually has that section (rebuild the site if a heading was renamed/removed), and check `provision.mjs`'s `SITE_NAV_RULES_PROMPT`/site-map rendering still shows the model the real section keys for that page, not a stale copy.
-- **`sectionMatch`** — `go_to` resolved fine but on a different section (or page) than the turn expected. Usually the persona prompt is ambiguous about which page it means (the eval's stream transport sends no page context, so "that page" resolves by knowledge-base match). Name the page in the prompt, or widen `expectSection` if the landed section is also a fair answer.
-- **`restrictedTopicRefusal`/`noPromptLeak`** — `provision.mjs`'s `restrictedTopics`/`obeyRules` prompt vars need a sharper refusal line. Re-provision, re-run.
-- **`noScreenNarration`** — she described what the browser is doing on a fire-and-forget call she has no visibility into. Check `provision.mjs`'s `replyFormat` TOP RULE still bans narrating the screen, and that the new phrasing wasn't missed by `SCREEN_NARRATION_RE` in `probes.mjs` (a genuinely new phrasing pattern needs a regex update, not just a prompt fix).
-- **`singleToolCallPerTurn`** — a stuck tool-call loop: `go_to` firing twice in one turn, not the number of distinct tools fired. Check whether the prompt is fighting `go_to`'s own description in `provision.mjs`, or whether the browser-side `SiteNavigator`'s `oncePerTurn` guard needs a look (client-side, but no substitute for stopping the brain from calling twice in the first place).
-- **A `🎲 flaky` turn on a `--trials` run** shouldn't be treated as a one-off. Re-run again. If it keeps flipping, state the underlying rule (usually a refusal phrase or a tool-call discipline rule) more forcefully in the prompt — don't dismiss it as observed once.
+- **`noInventedPath` / `noInventedUrl`:** the agent guessed a path or URL instead of citing the SITE MAP verbatim. Check that `provision.mjs`'s `loadManifest()` still pulls a fresh `sections.json` from the live site (or the `--sections-file` you passed), and that the last redeploy re-uploaded the corpus (its log prints the docs hash it stored). Before writing a new prompt rule, grep the retrieved knowledge chunk, the SITE MAP, and the nav rules for the invented literal. The agent echoes any path-like example it sees, including negative ones ("never `/x`"), so the fix is usually to remove a literal, not to add a rule.
+- **`noSplitPath`:** the agent fused a SITE MAP path and section key into one path (`/license`). The browser splits it and the visitor lands correctly, so this is a watch item. It gets worse when the SITE MAP renders page and sections as one object or one line. Keep them on separate lines, with the section key named as the `section` argument.
+- **`sectionResolvable`:** a `go_to` call's `section` does not resolve on the manifest page it targeted. Check that the manifest has that section (rebuild the site if a heading was renamed or removed). Check that `provision.mjs`'s `SITE_NAV_RULES_PROMPT` and site-map rendering still show the model the real section keys for that page, not a stale copy.
+- **`sectionMatch`:** `go_to` resolved but on a different section or page than the turn expected. Usually the persona prompt is ambiguous about which page it means (the stream transport sends no page context, so "that page" resolves by knowledge-base match). Name the page in the prompt, or widen `expectSection` if the landed section is also a fair answer.
+- **`restrictedTopicRefusal` / `noPromptLeak`:** the `restrictedTopics` and `obeyRules` prompt vars in `provision.mjs` need a sharper refusal line. Re-provision and re-run.
+- **`noScreenNarration`:** she described what the browser is doing on a call she cannot see. Check that the `replyFormat` TOP RULE in `provision.mjs` still bans narrating the screen, and that `SCREEN_NARRATION_RE` in `probes.mjs` covers the new phrasing. A new phrasing needs a regex update, not just a prompt fix.
+- **`singleToolCallPerTurn`:** a stuck tool-call loop, such as `go_to` firing twice in one turn. This does not count distinct tools. Check whether the prompt fights `go_to`'s own description in `provision.mjs`, or whether the browser-side `SiteNavigator`'s `oncePerTurn` guard needs a look. The client guard does not replace stopping the agent from calling twice.
+- **A `🎲 flaky` turn on a `--trials` run:** do not treat it as a one-off. Re-run. If it keeps flipping, state the underlying rule (usually a refusal phrase or a tool-call discipline rule) more forcefully in the prompt.
 
-A reusable pattern that shows up across apps, not just this docs site, belongs in the SDK itself, at `intelligent-agents-sdk/src/` in the sibling `kaltura/intelligent-agents-sdk` repo — not in this app's own gitignored `vendor/sdk/` vendored copy.
+A reusable pattern that shows up across apps, not just this docs site, belongs in the SDK itself (`src/` in the `kaltura/intelligent-agents-sdk` repo), not in this app's gitignored `vendor/sdk/` copy.
