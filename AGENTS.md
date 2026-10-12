@@ -1,26 +1,26 @@
 # AGENTS.md
 
-Quick orientation for a coding agent working in this repo. It's a pointer to the real docs, not a replacement for them — see the map in [README.md](README.md) for the full set.
+Quick orientation for a coding agent working in this repo. It points to the real docs. The full doc map is in [README.md](README.md).
 
 ## What this is
 
-Nova: a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agents` public docs site. This repo provisions/redeploys her (`server/provision.mjs`) and proves she behaves with a live, no-mock conversational eval suite (`tests/eval/`).
+Nova: a live Kaltura Agentic Avatar embedded on the `@kaltura/intelligent-agents` public docs site. This repo provisions and redeploys her (`server/provision.mjs`) and proves she behaves with a live, no-mock conversational eval suite (`tests/eval/`).
 
-This repo is standalone (it vendors the SDK from jsDelivr, no local checkout needed to run it), but if you're touching `provision.mjs`'s `Management` calls, tool/capability names, or anything the SDK's own contract governs, cross-check against the SDK itself: [kaltura/intelligent-agents-sdk](https://github.com/kaltura/intelligent-agents-sdk) — its `API-REFERENCE.md` and `SDK_CONSTITUTION.md` are the source of truth for what's a real, verified field vs. an assumption.
+The repo is standalone. It vendors the SDK from jsDelivr, so no local checkout is needed. When you change `provision.mjs`'s `Management` calls, tool or capability names, or anything else the SDK's contract governs, check it against [kaltura/intelligent-agents-sdk](https://github.com/kaltura/intelligent-agents-sdk). Its `API-REFERENCE.md` and `SDK_CONSTITUTION.md` say which fields are verified.
 
 ## Before you touch anything
 
-- Zero runtime dependencies, plain ESM, no build step. `npm install`'s `postinstall` vendors the SDK from jsDelivr into gitignored `vendor/sdk/`.
-- Credentials live only in `.env` (gitignored) or CI environment secrets. Never commit a real `AGENTIC_ADMIN_SECRET` or a raw KS token (`djJ8...`). Run `node scripts/scan-secrets.mjs` before any commit touching tracked files.
-- `node server/provision.mjs` with no flags **always creates a brand-new intellect/avatar/agent** — it never touches the live Nova on the public docs site unless you explicitly pass `--reuse <configId> --agent-id <agentId>` read from `server/agent.json`. Safe to run for testing.
-- `server/agent.json` is committed on purpose; [SECURITY.md](SECURITY.md) explains why.
-- `tests/eval/` contains real adversarial jailbreak prompts and Nova's exact refusal phrasing, published deliberately as reference material (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). If you add to it, follow [SECURITY.md](SECURITY.md): no real credentials, no other party's private data, nothing crafted to attack a different live system.
+- Zero runtime dependencies, plain ESM, no build step. `postinstall` vendors the SDK from jsDelivr into the gitignored `vendor/sdk/`.
+- Credentials live only in `.env` (gitignored) or CI environment secrets. Never commit a real `AGENTIC_ADMIN_SECRET` or a raw KS token. Run `node scripts/scan-secrets.mjs` before any commit.
+- `node server/provision.mjs` with no flags always creates a brand-new intellect, avatar, and agent. It leaves the live Nova alone unless you pass `--reuse <configId> --agent-id <agentId>` with the ids from `server/agent.json`. It does overwrite `server/agent.json` (the old file goes to `server/agent.json.bak`), so restore it with `git checkout server/agent.json` before committing.
+- `server/agent.json` is committed on purpose. [SECURITY.md](SECURITY.md) says why.
+- `tests/eval/` holds real adversarial jailbreak prompts and Nova's exact refusal phrasing. They are published on purpose, as reference material. If you add to them, follow [SECURITY.md](SECURITY.md).
 
 ## Commands
 
 | Task | Command | Needs live credentials? |
 |---|---|---|
-| Unit tests (probes + provision helpers) | `npm run test:eval:unit` | No |
+| Unit tests (probes, provision helpers, transports, personas, workflows, digest) | `npm run test:eval:unit` | No |
 | Syntax-check `provision.mjs` | `node --check server/provision.mjs` | No |
 | Secret scan | `node scripts/scan-secrets.mjs` | No |
 | Preview the conversation digest change | `node server/provision.mjs --digest-plan` | Yes (read-only, needs `DIGEST_RECIPIENTS`) |
@@ -28,19 +28,8 @@ This repo is standalone (it vendors the SDK from jsDelivr, no local checkout nee
 | Eval dashboard | `npm run eval:dashboard` | Yes |
 | Reliability check (pass^k) | `node tests/eval/run.mjs --trials 3` | Yes |
 
+Every script and flag: [docs/REFERENCE.md](docs/REFERENCE.md).
+
 ## Before opening a PR
 
-Run the three no-credential checks above — they're exactly what `.github/workflows/ci.yml` runs on every PR/push, no secrets needed. `redeploy.yml`/`eval.yml` are separately gated behind a GitHub `production` environment with required reviewers; don't loosen that gating.
-
-## Docs map
-
-| Doc | Read it for |
-|---|---|
-| [README.md](README.md) | Overview, quickstart, full doc map |
-| [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | Fresh clone → passing eval run, step by step |
-| [docs/EVALS.md](docs/EVALS.md) | What the eval suite covers and how it works, in one skim |
-| [docs/HOW-TO.md](docs/HOW-TO.md) | Redeploy, tear down, extend, CI setup |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Why the repo and the eval harness are built this way |
-| [docs/REFERENCE.md](docs/REFERENCE.md) | Every script, flag, and env var |
-| [tests/eval/GUIDELINES.md](tests/eval/GUIDELINES.md) | Every eval dimension, why it's (or isn't) release-blocking, failure triage |
-| [SECURITY.md](SECURITY.md) | Vulnerability reporting, credential handling, what's in/out of scope |
+Run the first three commands above. They are exactly what `.github/workflows/ci.yml` runs on every PR, and they need no secrets. `redeploy.yml` and `eval.yml` sit behind a GitHub `production` environment with required reviewers. Do not loosen that gate.
