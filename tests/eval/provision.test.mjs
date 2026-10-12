@@ -17,7 +17,7 @@ const {
   targetArgsLine, rewriteTargetMarkup, SIGNUP_LINK_TOOL_NAME, signupLinkTool,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
   chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry,
-  reportUnconfirmed, failedEntriesProblem, canReuseCorpus, sealNewCorpus,
+  reportUnconfirmed, reportLeftoverDeletes, failedEntriesProblem, canReuseCorpus, sealNewCorpus,
   multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem, waitForKnowledgeReady, verifyWaitMs,
 } = await import('../../server/provision.mjs');
 const { lintPersonaIdentity } = await import('../../vendor/sdk/src/management/prompt-lint.js');
@@ -766,6 +766,18 @@ test('reportUnconfirmed: no summary file outside CI, and nothing at all when not
   assert.equal(logs.length, 1);
   assert.equal(reportUnconfirmed({ pending: [] }, 1, 0, { env: { GITHUB_STEP_SUMMARY: '/x' }, log: (m) => logs.push(m), appendSummary: append }), null);
   assert.equal(logs.length, 1);
+});
+
+test('reportLeftoverDeletes: leftover deletes only warn and add a summary line, nothing else', () => {
+  const logs = [];
+  const summary = [];
+  const msg = reportLeftoverDeletes([{ kind: 'entry', id: 'e1', code: 'ACTION_BLOCKED' }, { kind: 'entry', id: 'e2', code: 'ACTION_BLOCKED' }], {
+    env: { GITHUB_STEP_SUMMARY: '/tmp/summary.md' }, log: (m) => logs.push(m), appendSummary: (f, t) => summary.push([f, t]),
+  });
+  assert.match(msg, /^2 delete call\(s\) for the previous corpus failed or were throttled\. The new corpus is live/);
+  assert.deepEqual(logs, [`::warning::${msg}`]);
+  assert.deepEqual(summary, [['/tmp/summary.md', `- :warning: ${msg}\n`]]);
+  assert.equal(reportLeftoverDeletes([], { env: { GITHUB_STEP_SUMMARY: '/x' }, log: () => assert.fail('silent'), appendSummary: () => assert.fail('silent') }), null);
 });
 
 test('failedEntriesProblem: only entries with an error status are a problem, pending ones are not', () => {
