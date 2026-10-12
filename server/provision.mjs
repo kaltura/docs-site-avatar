@@ -877,8 +877,8 @@ async function provisionSteps(ctx) {
       // The outgoing corpus is safe to delete.
       removePrevious: live && (async () => {
         console.log(`✓ removing previous knowledge corpus entries (category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries; the unlinked record ${live.recordIds.join(',') || 'none'} is left in place)`);
-        const leftovers = await deleteKnowledge(admin, live);
-        return leftovers.length ? [`${leftovers.length} delete call(s) for the previous corpus failed, so its entries or category may be orphaned`] : [];
+        reportLeftoverDeletes(await deleteKnowledge(admin, live));
+        return [];
       }),
     }));
   }
@@ -1044,6 +1044,20 @@ export async function pollEntryStatus(admin, knowledgeRecordId, entryIds, budget
   if (pending.size) log(`⚠ ${pending.size}/${entryIds.length} entries not confirmed indexed after ${Math.round((now() - startedAt) / 60_000)} min — the indexer has not reached them yet`);
   else if (!failed.size) log('✓ all entries confirmed indexed');
   return { indexed: entryIds.length - pending.size - failed.size, failed: [...failed.keys()], pending: [...pending] };
+}
+
+/** Alert that deletes of the previous corpus failed or were throttled. The new corpus is already live
+ * and the old entries are unlinked, so this is never a failure: it prints a `::warning::` annotation
+ * and, when `$GITHUB_STEP_SUMMARY` is set, adds a line to the job summary for audit. Returns the
+ * message, or null when nothing was left. `env`, `log` and `appendSummary` are injectable for tests. */
+export function reportLeftoverDeletes(leftovers, {
+  env = process.env, log = console.log, appendSummary = appendFileSync,
+} = {}) {
+  if (!leftovers.length) return null;
+  const message = `${leftovers.length} delete call(s) for the previous corpus failed or were throttled. The new corpus is live. The old entries are unlinked and can be removed later.`;
+  log(`::warning::${message}`);
+  if (env.GITHUB_STEP_SUMMARY) appendSummary(env.GITHUB_STEP_SUMMARY, `- :warning: ${message}\n`);
+  return message;
 }
 
 /** Alert that some entries are not confirmed indexed yet. Slow indexing is never a failure and
