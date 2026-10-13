@@ -381,6 +381,10 @@ test('noInventedUrl: an allow-listed external domain passes', () => {
   const r = probeNoInventedUrl('Install via https://cdn.jsdelivr.net/gh/kaltura/intelligent-agents-sdk@v1.0.1/src/management/index.js', siteData);
   assert.equal(r.pass, true);
 });
+test('noInventedUrl: the docs placeholder host example.com passes', () => {
+  const r = probeNoInventedUrl('Use `https://api.example.com/weather?city={city}` as the url.', siteData);
+  assert.equal(r.pass, true);
+});
 test('noInventedUrl: a fabricated URL fails', () => {
   const r = probeNoInventedUrl(`See ${siteData.baseUrl}/pricing/ for details.`, siteData);
   assert.equal(r.pass, false);
