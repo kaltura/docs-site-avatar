@@ -278,6 +278,33 @@ export function buildPersonas(siteData) {
           // The wrong answer claims prepare() asks for the microphone or starts the avatar.
           relevanceNone: ['\\bprepare\\(\\)[^.]{0,60}(?<!(?:\\b(?:no|not|never)|n.t)\\s)\\b(asks?|requests?|prompts?)\\b[^.]{0,30}\\b(for )?(the )?(mic|microphone)\\b'],
         },
+        {
+          prompt: 'I want a skill to apply only in avatar sessions. Should I write its condition as {{ sys__avatar_enabled }}?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['bare', 'without', 'not wrapped', "don't wrap", 'do not wrap', 'no braces', 'without braces', 'empty reply'],
+          // The wrong answer tells the visitor to keep the braces.
+          relevanceNone: ['\\b(yes|correct|right)\\b[^.]{0,40}\\b(wrap|braces|\\{\\{)'],
+        },
+        {
+          prompt: 'Is there a tool type that just sets a variable on the thread, without calling any external API?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['`var`', '"var"', 'var tool', 'var type', 'type var'],
+        },
+        {
+          prompt: 'Can an api tool put the model\'s argument into the request url, for example a city name in a query string?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['placeholder', 'substitut', 'replaced', 'filled', 'fill in', 'single brace', 'curly'],
+        },
+        {
+          prompt: 'Which type values can a prompt block have, and can a prompt block have a condition?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAll: ['system', 'knowledge', 'custom', 'condition'],
+        },
+        {
+          prompt: 'skills.list returns a skill I never created. Why, and can I read it with skills.get?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['shared', 'partner_id: 0', 'partner id 0', 'system skill'],
+        },
       ],
     },
     {
