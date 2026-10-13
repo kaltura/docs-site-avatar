@@ -614,7 +614,8 @@ export function buildPersonas(siteData) {
         },
         {
           prompt: 'What commands do I run to install it?',
-          relevanceAny: ['/plugin marketplace add', 'kaltura-app-builder'],
+          // Nova speaks the commands, so accept the spoken form too ("slash plugin marketplace add").
+          relevanceAny: ['/plugin marketplace add', 'plugin marketplace add', 'kaltura-app-builder', 'kaltura app builder'],
           relevanceNone: ['knowledge record', '\\brag\\b'],
         },
       ],

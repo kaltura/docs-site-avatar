@@ -18,6 +18,8 @@ const EXTERNAL_ALLOWLIST = [
   'github.com/kaltura',
   'npmjs.com',
   'kaltura.com',
+  // RFC 2606 placeholder host: the docs use api.example.com in code samples.
+  'example.com',
 ];
 
 const PROMPT_LEAK_TERMS = [
