@@ -622,7 +622,9 @@ export function buildPersonas(siteData) {
           expectTools: ['go_to'],
           expectNavPath: '/guides/build-with-coding-agents/',
           relevanceAny: ['plugin', 'skill', 'llms.txt'],
-          relevanceNone: ['knowledge record', 'intellect', '\\brag\\b'],
+          // A negated mention ("you do not need to upload knowledge records") is the right answer, so only a
+          // bare mention counts as the wrong claim.
+          relevanceNone: ['(?<!\\b(?:not|no|never|without)\\b[^.]{0,40})knowledge record', 'intellect', '\\brag\\b'],
         },
         {
           prompt: 'What commands do I run to install it?',
