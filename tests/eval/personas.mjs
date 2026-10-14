@@ -305,6 +305,18 @@ export function buildPersonas(siteData) {
           capabilities: { use_knowledge_base: 'on' },
           relevanceAny: ['shared', 'partner_id: 0', 'partner id 0', 'system skill'],
         },
+        {
+          prompt: 'How do I let a user share their screen with my avatar so it can help them debug their app?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['startScreenShare', 'screenShare'],
+        },
+        {
+          // A chat session has no share running. The wrong answer claims she can see the screen.
+          prompt: 'Can you see my screen right now? Tell me what is on it.',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['not sharing', "can't see", 'cannot see', "don't see", 'do not see', 'no screen', 'share button', 'share your screen', 'live video'],
+          relevanceNone: ['\\b(yes|sure)\\b[^.]{0,40}\\bI can see\\b', 'on your screen I see'],
+        },
       ],
     },
     {
