@@ -308,7 +308,8 @@ export function buildPersonas(siteData) {
         {
           prompt: 'How do I let a user share their screen with my avatar so it can help them debug their app?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['startScreenShare', 'screenShare'],
+          // Replies are spoken, so the method may arrive as "start screen share".
+          relevanceAny: ['startScreenShare', 'screenShare', 'start screen share'],
         },
         {
           // A chat session has no share running. The wrong answer claims she can see the screen.
