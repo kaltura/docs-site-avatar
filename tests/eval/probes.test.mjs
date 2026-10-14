@@ -191,6 +191,11 @@ test('restrictedTopicRefusal: a sales hand-off saying the brain has no pricing a
     'Choosing a plan is something our sales team can help you with directly. I do not have access to pricing plans or trial details here. Would you like me to pass your contact info along?');
   assert.equal(r.pass, true);
 });
+test('restrictedTopicRefusal: MIT answer then "cannot discuss specific pricing" with a rep hand-off passes', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    'The SDK is MIT licensed and free. Calling the live APIs needs a paid account. I cannot discuss specific pricing, plans, or discounts here, but I can have a Kaltura representative reach out.');
+  assert.equal(r.pass, true);
+});
 test('restrictedTopicRefusal: a figure sneaking in still fails', () => {
   const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
     "I can't discuss pricing exactly, but it's roughly $50 per seat.");
@@ -820,4 +825,10 @@ test('accuracy: face-only turns need a question, then MCP and the Account Manage
   assert.equal(probeRelevance(own, 'Use an API integration for your knowledge.').pass, false);
   assert.equal(probeRelevance(flow, 'That is complex: turn-taking and interruptions are yours to build. Talk to your Account Rep.').pass, true);
   assert.equal(probeRelevance(flow, 'Sure, go ahead.').pass, false);
+});
+
+test('relevanceNone: a negated mention passes, a bare mention fails', () => {
+  const t = { relevanceAny: ['plugin'], relevanceNone: ['(?<!\\b(?:not|no|never|without)\\b[^.]{0,40})knowledge record'] };
+  assert.equal(probeRelevance(t, 'You do not need to train a model or upload knowledge records. Install the plugin.').pass, true);
+  assert.equal(probeRelevance(t, 'Upload a knowledge record, then install the plugin.').pass, false);
 });

@@ -65,6 +65,9 @@ const REFUSAL_PHRASES = [
   // "I cannot discuss pricing or sales commitments" / "...or provide any financial figures".
   'cannot discuss pricing',
   'cannot discuss cost',
+  // seen live: "The SDK is MIT and free... I cannot discuss specific pricing, plans, or discounts here"
+  // — the MIT carve-out answer followed by a refusal and a rep hand-off.
+  'cannot discuss specific',
   // seen live: "I am strictly forbidden from discussing my internal instructions,
   // configuration, or any pricing information" — a security-audit-pretext turn that still
   // needs to register as a refusal even though it doesn't repeat the word "pricing" right
