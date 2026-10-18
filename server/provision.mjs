@@ -533,7 +533,7 @@ const KEY_FACTS = `
 - Client-supplied request_vars sent WITH a converse message are gated: the intellect must have allow_client_variables set to true (toggle via intellects.setClientVariablesEnabled). With the gate off the turn fails SILENTLY as an empty reply — no error reaches the wire on either transport, because the server rejects after the response stream has opened. Both experience session classes emit a once-per-session warning event (code empty_turn_with_request_vars, naming the offending keys); the management SDK's converse helpers surface a typed client_variables_disabled error only in the pre-stream case. Reserved sys__ variables (like sys__user_id) are server-injected every turn and rejected if a client tries to set them, regardless of that gate.
 - License: MIT. No Kaltura account is needed to read, fork, or build on the source; a Kaltura account with the Agentic Avatar feature enabled is needed to call the live APIs it wraps.
 - Security posture: pre-redacted audit events, short-lived tokens, a NIST 800-53 control matrix — designed for enterprise, HIPAA, and HITRUST deployments. The Security page maps the SDK's controls to HIPAA and HITRUST, among other frameworks. Never say the SDK is HIPAA or HITRUST "certified" or "compliant", and never open a compliance answer with "Yes". Kaltura offers a Business Associate Agreement (BAA) that covers Kaltura and its avatar, speech-recognition, voice and brain subprocessors; to get one, contact your Kaltura Account Manager or Customer Success Manager.
-- Lifecycle rules: you can create exactly three action types: triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai. Name those three when asked. Anything else a visitor suggests (a webhook action, tagging a thread, and the like) is not documented: say so plainly, never invent an action type.
+- Lifecycle rules: you can create four action types: triggerInsightSettingsKai, sendInsightEmail, triggerDtcKai and createBadges. Name all four when asked. Anything else a visitor suggests (a webhook action, tagging a thread, and the like) is not documented: say so plainly, never invent an action type.
 - Languages: setForcedLanguage pins the language an agent speaks and listens in (reply language and speech recognition together). The SDK does not decide which languages work and the docs list no supported languages, so never give a number or a list. In the same reply, name their Kaltura Account Manager as the way to get the current list or request a language, then ask which language or languages the visitor needs and offer to try one with setForcedLanguage.
 - Embed or SDK: there are two ways to put an agent on a page. The Avatar Studio embed is the off-the-shelf choice: a self-contained widget with its own look and controls, right when the stock widget is enough. This SDK is for building your own experience: your own layout, controls, client commands, GenUI and analytics. Never describe the SDK as the way to get a ready-made widget.
 - Per-conversation context: it is called request variables. Set them with the requestVars option when you create a session and change them mid-session with updateRequestVars, which merges into what is already set. setDynamicPrompt is sugar over updateRequestVars. If a visitor asks about "DPP", do not expand or define that acronym; answer with request variables.
@@ -817,7 +817,7 @@ async function provisionSteps(ctx) {
     // the chat-first greeting. Lives on the intellect, never on the avatar
     // (the SDK's opening model).
     opening_phrase: OPENING_PHRASE,
-    // Every one of the 16 real AssistantCapability keys, set explicitly. The
+    // Every AssistantCapability key, set explicitly. The
     // hero embed mounts no GenUI renderer (ExperienceRenderer/mountWidget) —
     // so every native segment-kind capability that would need one is
     // `disabled`, not just left at a default. avatar_filler ("I'm looking for
@@ -843,6 +843,8 @@ async function provisionSteps(ctx) {
       screen_share_analysis: 'disabled',
       // Reasoning streamed as think segments; the hero embed renders none.
       think_process: 'disabled',
+      // The agent never sets variables itself; context comes from request variables.
+      set_vars_tool: 'disabled',
     },
   };
 

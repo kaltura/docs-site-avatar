@@ -395,7 +395,7 @@ export function buildPersonas(siteData) {
       turns: [
         {
           prompt: 'Which lifecycle action types can I create?',
-          relevanceAll: ['triggerInsightSettingsKai', 'sendInsightEmail', 'triggerDtcKai'],
+          relevanceAll: ['triggerInsightSettingsKai', 'sendInsightEmail', 'triggerDtcKai', 'createBadges'],
           // A negated mention ("there is no webhook action") is a correct answer.
           relevanceNone: ['(?<!\\b(?:no|not)\\s)\\bwebhooks?\\b', '(?<!\\b(?:no|not)\\s)\\btag(?:ging)? (?:a )?thread', 'phase\\s*(?:2|two)'],
         },
