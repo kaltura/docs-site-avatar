@@ -30,7 +30,7 @@ A redeploy that ends with a "not confirmed indexed yet" warning still succeeded.
 
 ## Create or update the conversation digest
 
-Set `DIGEST_RECIPIENTS` in `.env` (comma-separated recipients of the digest email). Preview the change, then apply it:
+Set `DIGEST_RECIPIENTS` in `.env` (comma-separated Kaltura user ids, see [docs/REFERENCE.md](REFERENCE.md)). Preview the change, then apply it:
 
 ```bash
 node server/provision.mjs --digest-plan   # read-only: create / update / unchanged per object

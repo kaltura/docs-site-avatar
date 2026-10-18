@@ -114,7 +114,7 @@ Why they are shaped this way: [ARCHITECTURE.md](ARCHITECTURE.md#about-redeployin
 |---|---|---|
 | `AGENTIC_PARTNER_ID` | Yes | Partner ID for every `Management` call (`provision.mjs`, `run.mjs`, the dashboard) |
 | `AGENTIC_ADMIN_SECRET` | Yes | Admin secret paired with the partner ID. Never commit a real value |
-| `DIGEST_RECIPIENTS` | For `--digest` and `--digest-plan` | Comma-separated recipients of the digest email. Set it in the gitignored `.env` or as a CI secret. Never commit it |
+| `DIGEST_RECIPIENTS` | For `--digest` and `--digest-plan` | Comma-separated Kaltura user ids that receive the digest email (not email addresses). Set it in the gitignored `.env` or as a CI secret. Never commit it |
 | `DIGEST_EMAIL_APP_GUID` | Only when the email template does not exist yet | Messaging app id of the account, needed to create the template. Not needed to update it |
 | `SITE_REPO_DIR` | No | Docs-site checkout path. The `--site-dir` flag takes precedence. Without either, `site-root.mjs` uses the sibling `../intelligent-agents-sdk-site` |
 | `AGENTIC_GENIE_URL` | No | Overrides the conversation backend URL both eval transports talk to: the `Management` client behind `transport.mjs` and the dashboard, and `chat-transport.mjs`'s `KalturaChatSession`. Defaults to production |

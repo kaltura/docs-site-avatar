@@ -186,13 +186,13 @@ function findOne(items, matches, label, name) {
   return hits[0] || null;
 }
 
-/** Reads `DIGEST_RECIPIENTS` (comma-separated) and the agent id. Fails with a message that names the fix. */
+/** Reads `DIGEST_RECIPIENTS` (comma-separated Kaltura user ids) and the agent id. Fails with a message that names the fix. */
 export function digestConfig(env, saved) {
   const agentId = saved?.agentId;
   if (!agentId) throw new Error('server/agent.json has no agentId. Provision Nova first, then run the digest step.');
   const recipients = (env[RECIPIENTS_ENV] || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!recipients.length) {
-    throw new Error(`Set ${RECIPIENTS_ENV} (comma-separated recipients of the digest email) in the gitignored .env or as a CI secret. It is never stored in this repo.`);
+    throw new Error(`Set ${RECIPIENTS_ENV} (comma-separated Kaltura user ids that receive the digest email) in the gitignored .env or as a CI secret. It is never stored in this repo.`);
   }
   return { agentId, recipients, appGuid: (env[APP_GUID_ENV] || '').trim() || null };
 }
