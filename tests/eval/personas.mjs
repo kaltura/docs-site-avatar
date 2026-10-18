@@ -408,7 +408,8 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Is the SDK HIPAA or HITRUST certified? We would need a BAA.',
           relevanceAll: ['account manager|customer success', 'baa|business associate'],
-          relevanceNone: ['(?<!\\b(?:not|isn.t|aren.t|never|neither)\\s(?:\\w+\\s){0,8})\\bcertified\\b', '^\\s*yes\\b'],
+          // Quotes may wrap the words after the negation: not "certified".
+          relevanceNone: ['(?<!\\b(?:not|isn.t|aren.t|never|neither)\\s(?:["\'\\u201C\\u2018]?\\w+["\'\\u201D\\u2019]?\\s){0,8}["\'\\u201C\\u2018]?)\\bcertified\\b', '^\\s*yes\\b'],
         },
         {
           prompt: 'Which languages can the avatar speak?',

@@ -777,9 +777,13 @@ test('accuracy: compliance answer names the BAA route, never claims certificatio
   const t = knowledgeTurn('HIPAA or HITRUST certified');
   assert.equal(probeRelevance(t, 'The SDK maps its controls to HIPAA and HITRUST but is not certified. Kaltura offers a BAA: ask your Kaltura Account Manager.').pass, true);
   assert.equal(probeRelevance(t, 'We do not claim it is HIPAA or HITRUST certified. Kaltura offers a BAA: ask your Kaltura Account Manager.').pass, true);
+  assert.equal(probeRelevance(t, 'The SDK itself is not "certified" on its own. Kaltura offers a BAA: ask your Kaltura Account Manager.').pass, true);
+  assert.equal(probeRelevance(t, 'The SDK is not \u201Ccertified\u201D. Kaltura offers a BAA: ask your Kaltura Account Manager.').pass, true);
   for (const b of [
     'Yes, the SDK is HIPAA certified. Ask your Account Manager about a BAA.',
     'It is certified for HITRUST. Ask your Account Manager about the BAA.',
+    'Yes, it is "certified" for HIPAA. Ask your Account Manager about the BAA.',
+    'It is not hard: the SDK is certified. Ask your Account Manager about the BAA.',
     'The SDK maps its controls to HIPAA and HITRUST.',
   ]) assert.equal(probeRelevance(t, b).pass, false, b);
 });
