@@ -370,9 +370,9 @@ export function buildPersonas(siteData) {
           relevanceNone: ['token(will)?expir\\w*', 'token(will)?refresh\\w*'],
         },
         {
-          prompt: 'Which session method sends the viewer’s structured form answers back to the brain, and does calling it make the avatar talk?',
+          prompt: 'After the viewer fills in a structured form, how do I get their answers to the agent so it can use them?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['submitstructureddataform', 'submit structured', 'setformleadinfo'],
+          relevanceAny: ['speak', 'updaterequestvars', 'update request vars', 'request variables', 'request vars'],
         },
         {
           prompt: 'How do I fetch the full transcript of a past conversation thread, and what format does the transcript come back in?',
