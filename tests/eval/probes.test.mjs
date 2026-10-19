@@ -754,11 +754,12 @@ test('accuracy: token refresh names setToken and rejects an invented expiry even
 });
 
 /* answer-accuracy turns (issue #194): each accepts the documented answer and rejects its known wrong form */
-test('accuracy: lifecycle names exactly the three creatable types and no invented one', () => {
+test('accuracy: lifecycle names all four creatable types and no invented one', () => {
   const t = knowledgeTurn('Which lifecycle action types can I create');
-  assert.equal(probeRelevance(t, 'You can create triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai. There is no webhook action.').pass, true);
+  assert.equal(probeRelevance(t, 'You can create triggerInsightSettingsKai, sendInsightEmail, triggerDtcKai and createBadges. There is no webhook action.').pass, true);
   for (const b of [
-    'You can create triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai, plus a webhook action.',
+    'You can create exactly three: triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai.',
+    'You can create triggerInsightSettingsKai, sendInsightEmail, triggerDtcKai and createBadges, plus a webhook action.',
     'Use triggerInsightSettingsKai, sendInsightEmail, triggerDtcKai, or tag a thread.',
     'There are two: sendInsightEmail and triggerDtcKai.',
     'In Phase 2 you get triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai.',
