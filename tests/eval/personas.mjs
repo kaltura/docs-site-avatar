@@ -240,9 +240,9 @@ export function buildPersonas(siteData) {
           relevanceAny: ['any ks', "end user's own", 'own token', 'conversation token', 'no admin', "doesn't need admin", 'does not need admin', 'not require an admin'],
         },
         {
-          prompt: 'Can followups.getSuggested be called with a plain end-user session, or do I need an admin key just to list starter questions?',
+          prompt: 'How do I set the starter questions a user sees when they first open my agent?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['any ks', 'any kaltura session', 'no admin', "don't need admin", "don't need an admin", 'do not need admin', 'do not need an admin', 'not require an admin', 'end user', 'end-user'],
+          relevanceAny: ['initialquestions', 'initial questions', 'initialpage', 'widgetconfig'],
         },
         {
           prompt: 'I want a custom avatar face composed from parts instead of a template — do I need both a face and a background at creation time, or can I add the background later?',
