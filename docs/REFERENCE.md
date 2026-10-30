@@ -17,7 +17,7 @@
 | `server/digest.mjs` | Creates and updates Nova's conversation digest objects (insight settings, email template, lifecycle rules). Run through `provision.mjs --digest` |
 | `server/digest-email.html` | HTML body of the digest email template |
 | `.github/workflows/ci.yml` | CI: offline checks on every pull request, no secrets |
-| `.github/workflows/redeploy.yml` | CI: redeploy Nova in place, gated behind the `production` environment |
+| `.github/workflows/redeploy.yml` | CI: redeploy Nova in place, gated behind the `production` environment (docs syncs run in `production-nightly`) |
 | `.github/workflows/eval.yml` | CI: run the eval suite against whatever `redeploy.yml` most recently produced |
 | `tests/eval/transport.mjs` | Wire layer: record-only `Conversations.stream()` turns, spiral circuit breaker |
 | `tests/eval/chat-transport.mjs` | Wire layer, chat mode: same contract, driven through the SDK's real `KalturaChatSession` |
@@ -101,10 +101,10 @@ Why they are shaped this way: [ARCHITECTURE.md](ARCHITECTURE.md#about-redeployin
 | Workflow | Trigger | Gate | Secrets read from |
 |---|---|---|---|
 | `ci.yml` | Pull request against `main` (`pull_request`, so it also runs for forks) | None | None |
-| `redeploy.yml` | Push to `server/provision.mjs` on `main`; nightly `schedule`; `repository_dispatch` (`site-updated`); `workflow_dispatch` (`rebuild` input) | `production` environment, required reviewers | `production` environment secrets |
-| `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` (`trials` input) | `production` environment, required reviewers. A `workflow_run` trigger queues the eval, which runs after approval | `production` environment secrets |
+| `redeploy.yml` | Push to `server/provision.mjs` on `main`; nightly `schedule`; `repository_dispatch` (`site-updated`); `workflow_dispatch` (`rebuild` input) | `production` environment, required reviewers, for a push or a manual run. `production-nightly`, no reviewers, `main` only, for `schedule` and `repository_dispatch` | Same two secrets in both environments |
+| `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` (`trials` input) | `production` environment, required reviewers, for a manual run or after a push or manual redeploy. `production-nightly` after a nightly or `site-updated` redeploy | Same two secrets in both environments |
 
-`redeploy.yml` and `eval.yml` need `AGENTIC_PARTNER_ID` and `AGENTIC_ADMIN_SECRET` as `production` environment secrets. Setup: [HOW-TO.md](HOW-TO.md#set-up-this-repos-ci-secrets-one-time).
+`redeploy.yml` and `eval.yml` need `AGENTIC_PARTNER_ID` and `AGENTIC_ADMIN_SECRET` as secrets in both the `production` and `production-nightly` environments. Setup: [HOW-TO.md](HOW-TO.md#set-up-this-repos-ci-secrets-one-time).
 
 ## Environment variables
 

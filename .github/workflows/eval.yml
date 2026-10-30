@@ -47,7 +47,9 @@ jobs:
     # The verify step waits up to 45 min for indexing (--index-wait-minutes). The eval itself takes
     # about 10 min at the default single trial, so the other 45 min leave room for more trials.
     timeout-minutes: 90
-    environment: production
+    # The eval after an unattended docs sync (nightly or site-updated) is unattended too. Every
+    # other eval keeps the `production` approval gate.
+    environment: ${{ contains(fromJSON('["schedule","repository_dispatch"]'), github.event.workflow_run.event) && 'production-nightly' || 'production' }}
     permissions:
       contents: read
     steps:

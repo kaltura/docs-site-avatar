@@ -16,9 +16,12 @@ test('redeploy.yml: runs nightly and on a site-updated dispatch, not only on a p
   assert.match(redeploy, /^ {2}repository_dispatch:\n {4}types: \[site-updated\]$/m);
 });
 
-test('both workflows keep the production environment on their job', () => {
-  assert.match(redeploy, /^ {4}environment: production$/m);
-  assert.match(evalWf, /^ {4}environment: production$/m);
+test('both workflows gate push and manual runs on production, and run docs syncs unattended', () => {
+  // Docs syncs (schedule, repository_dispatch) have nobody to approve them. They use the
+  // reviewer-free `production-nightly`; every other trigger keeps the `production` gate.
+  const env = /^ {4}environment: \$\{\{ contains\(fromJSON\('\["schedule","repository_dispatch"\]'\), (github\.[\w.]+)\) && 'production-nightly' \|\| 'production' \}\}$/m;
+  assert.equal(redeploy.match(env)?.[1], 'github.event_name');
+  assert.equal(evalWf.match(env)?.[1], 'github.event.workflow_run.event');
 });
 
 test('redeploy.yml: no cross-repo token or secret beyond the two production secrets', () => {
