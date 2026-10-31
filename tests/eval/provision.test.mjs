@@ -16,7 +16,8 @@ const {
   buildBaseDirective, PERSONA_NAME, OPENING_PHRASE, OPENING_INTRO, NOVA_GREET_VAR, KICKOFF_TRIGGER, hashDocs, CHUNK_FORMAT, goToArgsLine, labelHomeLine, HOME_LINE_NOTE, docsFromManifest,
   targetArgsLine, rewriteTargetMarkup, SIGNUP_LINK_TOOL_NAME, signupLinkTool,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
-  chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry,
+  chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry, uploadWithoutOrphans,
+  strayUploadIds, staleKnowledgeCategories, findStrayEntries, planCategoryPrune, buildPrunePlan,
   reportUnconfirmed, reportLeftoverDeletes, failedEntriesProblem, canReuseCorpus, sealNewCorpus,
   multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem, waitForKnowledgeReady, verifyWaitMs,
 } = await import('../../server/provision.mjs');
@@ -856,30 +857,156 @@ test('multirequestFailures: reads each result; an exception inside HTTP 200 is a
   assert.deepEqual(multirequestFailures(delCalls, [null, null, null]), [], 'a delete that worked returns null');
 });
 
-test('deleteKnowledge: returns and logs every failed delete, including per-call errors in a 200 response', async () => {
+const noWait = { wait: async () => {}, baseMs: 0 };
+
+test('deleteKnowledge: a failed entry delete is returned and logged, and the category is kept', async () => {
   const logs = [];
+  const seen = [];
   const failures = await deleteKnowledge('ks', { recordIds: [11], categoryIds: [7], entryIds: ['e1', 'e2'] }, {
-    multirequest: async () => [apiError('ENTRY_LOCKED'), {}, {}],
-    log: (m) => logs.push(m),
+    multirequest: async (calls) => { seen.push(...calls); return [apiError('ENTRY_LOCKED'), null]; },
+    log: (m) => logs.push(m), ...noWait,
   });
   assert.deepEqual(failures, [{ kind: 'entry', id: 'e1', code: 'ENTRY_LOCKED' }]);
-  assert.equal(logs.length, 1);
-  assert.match(logs[0], /1 knowledge delete\(s\) failed: entry e1: ENTRY_LOCKED/);
+  assert.ok(!seen.some((c) => c.service === 'category'), 'no category delete after an entry delete failed');
+  assert.equal(logs.length, 2);
+  assert.match(logs[0], /kept category 7/);
+  assert.match(logs[1], /1 knowledge delete\(s\) failed: entry e1: ENTRY_LOCKED/);
 });
 
-test('deleteKnowledge: a failed multirequest is one batch failure; a clean delete returns nothing and logs nothing', async () => {
+test('deleteKnowledge: entries go in small batches, then the categories in their own call', async () => {
+  const batches = [];
+  const entryIds = Array.from({ length: 25 }, (_, i) => `e${i}`);
+  const failures = await deleteKnowledge('ks', { categoryIds: [7, 8], entryIds }, {
+    multirequest: async (calls) => { batches.push(calls); return calls.map(() => null); }, log: () => assert.fail('silent'), ...noWait,
+  });
+  assert.deepEqual(failures, []);
+  assert.deepEqual(batches.map((b) => b.length), [10, 10, 5, 2]);
+  assert.ok(batches.slice(0, 3).every((b) => b.every((c) => c.service === 'baseentry')));
+  assert.ok(batches[3].every((c) => c.service === 'category'));
+});
+
+test('deleteKnowledge: throttled deletes are retried with a doubling pause, then succeed', async () => {
+  const waits = [];
+  let n = 0;
+  const failures = await deleteKnowledge('ks', { categoryIds: [7], entryIds: ['e1', 'e2'] }, {
+    multirequest: async (calls) => (calls[0].service === 'category' || n++ > 0 ? calls.map(() => null) : [apiError('ACTION_BLOCKED'), null]),
+    wait: async (ms) => { waits.push(ms); }, baseMs: 100, log: () => assert.fail('silent'),
+  });
+  assert.deepEqual(failures, []);
+  assert.deepEqual(waits, [100], 'one backoff before the retry round');
+});
+
+test('deleteKnowledge: deletes that stay throttled are final after the last round, and the category is kept', async () => {
+  const seen = [];
+  const failures = await deleteKnowledge('ks', { categoryIds: [7], entryIds: ['e1'] }, {
+    multirequest: async (calls) => { seen.push(calls); return [apiError('ACTION_BLOCKED')]; }, rounds: 3, log: () => {}, ...noWait,
+  });
+  assert.deepEqual(failures, [{ kind: 'entry', id: 'e1', code: 'ACTION_BLOCKED' }]);
+  assert.equal(seen.length, 3);
+  assert.ok(seen.flat().every((c) => c.service === 'baseentry'));
+});
+
+test('deleteKnowledge: a batch that cannot be sent is retried; a clean delete returns nothing and logs nothing', async () => {
   const logs = [];
-  const failed = await deleteKnowledge('ks', { categoryIds: [7], entryIds: ['e1'] }, { multirequest: async () => { throw new Error('multirequest HTTP 502'); }, log: (m) => logs.push(m) });
-  assert.deepEqual(failed, [{ kind: 'batch', id: '1 entries, categories 7', code: 'multirequest HTTP 502' }]);
-  const clean = await deleteKnowledge('ks', { recordIds: [1], categoryIds: [7], entryIds: ['e1'] }, { multirequest: async (calls) => calls.map(() => ({})), log: (m) => logs.push(m) });
+  const failed = await deleteKnowledge('ks', { categoryIds: [7], entryIds: ['e1'] }, { multirequest: async () => { throw new Error('multirequest HTTP 502'); }, rounds: 2, log: (m) => logs.push(m), ...noWait });
+  assert.deepEqual(failed, [{ kind: 'entry', id: 'e1', code: 'multirequest HTTP 502' }]);
+  assert.equal(logs.length, 2);
+  const clean = await deleteKnowledge('ks', { recordIds: [1], categoryIds: [7], entryIds: ['e1'] }, { multirequest: async (calls) => calls.map(() => ({})), log: (m) => logs.push(m), ...noWait });
   assert.deepEqual(clean, []);
-  assert.equal(logs.length, 1);
+  assert.equal(logs.length, 2, 'the clean run logged nothing');
+});
+
+test('deleteKnowledge: a permanent error is not retried', async () => {
+  let calls = 0;
+  const failures = await deleteKnowledge('ks', { entryIds: ['e1'] }, { multirequest: async () => { calls++; return [apiError('ENTRY_LOCKED')]; }, log: () => {}, ...noWait });
+  assert.equal(calls, 1);
+  assert.equal(failures[0].code, 'ENTRY_LOCKED');
 });
 
 test('deleteKnowledge: never deletes the knowledge record, only the entries and category', async () => {
   const seen = [];
-  await deleteKnowledge('ks', { recordIds: [11], categoryIds: [7], entryIds: ['e1'] }, { multirequest: async (calls) => { seen.push(...calls); return calls.map(() => null); }, log: () => {} });
+  await deleteKnowledge('ks', { recordIds: [11], categoryIds: [7], entryIds: ['e1'] }, { multirequest: async (calls) => { seen.push(...calls); return calls.map(() => null); }, log: () => {}, ...noWait });
   assert.deepEqual(seen.map((c) => `${c.service}/${c.action}`), ['baseentry/delete', 'category/delete']);
+});
+
+test('isTransientError: an SDK timeout (status 0) is transient', () => {
+  assert.equal(isTransientError({ status: 0, code: 'error' }), true);
+  assert.equal(isTransientError({ status: 404, code: 'not_found' }), false);
+});
+
+test('uploadWithoutOrphans: sweeps after every failed try, retries, and returns the upload', async () => {
+  const events = [];
+  let n = 0;
+  const out = await uploadWithoutOrphans(
+    async () => { events.push('upload'); if (++n < 3) throw Object.assign(new Error('timeout'), { status: 0, code: 'error' }); return { entryId: 'e9' }; },
+    async () => { events.push('sweep'); },
+    { wait: async () => {}, log: () => {} },
+  );
+  assert.deepEqual(out, { entryId: 'e9' });
+  assert.deepEqual(events, ['upload', 'sweep', 'upload', 'sweep', 'upload']);
+});
+
+test('uploadWithoutOrphans: sweeps after the last failed try; a failing sweep never hides the upload error', async () => {
+  const logs = [];
+  let sweeps = 0;
+  await assert.rejects(
+    uploadWithoutOrphans(
+      async () => { throw Object.assign(new Error('slow'), { status: 503 }); },
+      async () => { sweeps++; throw new Error('sweep broke'); },
+      { attempts: 2, wait: async () => {}, log: (m) => logs.push(m) },
+    ),
+    /slow/,
+  );
+  assert.equal(sweeps, 2);
+  assert.ok(logs.some((m) => /could not clear a stray entry: sweep broke/.test(m)));
+});
+
+test('uploadWithoutOrphans: a permanent error is swept once and not retried', async () => {
+  let uploads = 0, sweeps = 0;
+  await assert.rejects(uploadWithoutOrphans(async () => { uploads++; throw Object.assign(new Error('bad'), { status: 400 }); }, async () => { sweeps++; }, { wait: async () => {}, log: () => {} }), /bad/);
+  assert.deepEqual([uploads, sweeps], [1, 1]);
+});
+
+test('strayUploadIds: keeps out recorded entries and entries of another build', () => {
+  const rows = [{ id: 'a' }, { id: 'b', categoriesIds: '7' }, { id: 'c', categoriesIds: '7,9' }, { id: 'd', categoriesIds: '8' }];
+  assert.deepEqual(strayUploadIds(rows, ['b'], 7), ['a', 'c']);
+});
+
+test('planCategoryPrune: skips entries shared with a linked category and entries under an hour old', () => {
+  const cats = [
+    { id: 1, entries: [{ id: 'old', createdAt: 10 }, { id: 'shared', createdAt: 10, categoriesIds: '1,99' }] },
+    { id: 2, entries: [{ id: 'old2', createdAt: 10 }, { id: 'fresh', createdAt: 5_000 }] },
+  ];
+  assert.deepEqual(planCategoryPrune(cats, new Set([99]), 1_000), { entryIds: ['old', 'old2'], categoryIds: [1], keptCategoryIds: [2] });
+});
+
+test('staleKnowledgeCategories: only old, unlinked docs-site-avatar-knowledge categories', () => {
+  const cats = [
+    { id: 1, name: 'docs-site-avatar-knowledge-1', createdAt: 100 },
+    { id: 2, name: 'docs-site-avatar-knowledge-2', createdAt: 100 },
+    { id: 3, name: 'docs-site-avatar-knowledge-3', createdAt: 5_000 },
+    { id: 4, name: 'someone-elses', createdAt: 100 },
+  ];
+  assert.deepEqual(staleKnowledgeCategories(cats, new Set([2]), 1_000).map((c) => c.id), [1]);
+});
+
+test('findStrayEntries: picks categoryless Nova entries and pages past the 10,000 result cap', async () => {
+  const rows = Array.from({ length: 10_500 }, (_, i) => ({
+    id: `x${i}`, createdAt: 1_000 + i, name: i % 2 ? 'docs-site-avatar-a.md' : 'other-doc', categories: i % 5 === 0 ? 'cat' : '',
+  }));
+  const list = async (filter, pager) => {
+    const inWindow = rows.filter((r) => r.createdAt >= filter.createdAtGreaterThanOrEqual && r.createdAt <= filter.createdAtLessThanOrEqual);
+    const start = (pager.pageIndex - 1) * pager.pageSize;
+    return { objects: inWindow.slice(start, start + pager.pageSize) };
+  };
+  const stray = await findStrayEntries(list, { before: 99_999, since: 0 });
+  const expected = rows.filter((r) => r.name.startsWith('docs-site-avatar-') && !r.categories).map((r) => r.id);
+  assert.deepEqual(stray.sort(), expected.sort());
+});
+
+test('findStrayEntries: fails loudly when a whole second holds more than the cap', async () => {
+  const list = async (filter, pager) => ({ objects: pager.pageIndex <= 20 ? Array.from({ length: pager.pageSize }, (_, i) => ({ id: `s${pager.pageIndex}-${i}`, createdAt: 5, name: 'x', categories: 'c' })) : [] });
+  await assert.rejects(findStrayEntries(list, { before: 10, since: 0 }), /share the createdAt second/);
 });
 
 test('summarizeDeleteFailures: names the first few and counts the rest', () => {
@@ -959,4 +1086,64 @@ test('--help lists --knowledge-only', async () => {
   });
   assert.equal(r.status, 0);
   assert.match(r.stdout, /--knowledge-only/);
+});
+
+test('--prune-orphans runs alone, and --dry-run alone still needs --cleanup or --prune-orphans', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const run = (...args) => spawnSync(process.execPath, ['server/provision.mjs', ...args], {
+    env: { ...process.env, AGENTIC_PARTNER_ID: '1', AGENTIC_ADMIN_SECRET: 'x' }, encoding: 'utf8', timeout: 20000,
+  });
+  const mixed = run('--prune-orphans', '--rebuild');
+  assert.notEqual(mixed.status, 0);
+  assert.match(mixed.stderr, /--prune-orphans runs alone/);
+  const lone = run('--dry-run');
+  assert.notEqual(lone.status, 0);
+  assert.match(lone.stderr, /only apply with --cleanup or --prune-orphans/);
+  assert.match(run('--help').stdout, /--prune-orphans/);
+  const withVerify = run('--verify-knowledge', '--prune-orphans');
+  assert.notEqual(withVerify.status, 0);
+  assert.match(withVerify.stderr, /--prune-orphans runs alone/);
+});
+
+const pruneIo = (over = {}) => ({
+  intellects: async function* () { yield { id: 10 }; yield { id: 11 }; },
+  getLinkage: async (id) => ({ knowledgeIds: [id * 10] }),
+  getRecord: async (id) => ({ config: { sources: [{ categoryIds: [id === 100 ? 1 : 2] }] } }),
+  categories: async () => [{ id: 1, name: 'docs-site-avatar-knowledge-a', createdAt: 5 }, { id: 3, name: 'docs-site-avatar-knowledge-b', createdAt: 5 }],
+  categoryEntries: async () => [{ id: 'e1', createdAt: 5, categoriesIds: '3' }],
+  strays: async () => ['s1'],
+  ...over,
+});
+
+test('buildPrunePlan: keeps linked categories and plans the unlinked one', async () => {
+  const plan = await buildPrunePlan(pruneIo(), { before: 100, liveConfigId: 10 });
+  assert.deepEqual([...plan.linkedIds].sort(), [1, 2]);
+  assert.deepEqual(plan.categoryIds, [3]);
+  assert.deepEqual(plan.entryIds, ['e1']);
+  assert.deepEqual(plan.stray, ['s1']);
+});
+
+test('buildPrunePlan: fails closed when the live corpus cannot be proven', async () => {
+  const run = (io, liveConfigId = 10) => buildPrunePlan(pruneIo(io), { before: 100, liveConfigId });
+  await assert.rejects(run({}, null), /no configId/);
+  await assert.rejects(run({ intellects: async function* () {} }), /not in the intellect list/);
+  await assert.rejects(run({}, 99), /not in the intellect list/);
+  await assert.rejects(run({ getLinkage: async () => ({}) }), /links no knowledge category/);
+  await assert.rejects(run({ getLinkage: async () => null }), /links no knowledge category/);
+  await assert.rejects(run({ getRecord: async () => ({ config: {} }) }), /has no sources/);
+  await assert.rejects(run({ getRecord: async () => ({ config: { sources: [{}] } }) }), /links no knowledge category/);
+});
+
+test('buildPrunePlan: keeps a category whose entry list hit the cap, but still deletes the entries seen', async () => {
+  const full = Array.from({ length: 10_000 }, (_, i) => ({ id: `e${i}`, createdAt: 5, categoriesIds: '3' }));
+  const plan = await buildPrunePlan(pruneIo({ categoryEntries: async () => full }), { before: 100, liveConfigId: 10 });
+  assert.deepEqual(plan.categoryIds, []);
+  assert.deepEqual(plan.cappedCategoryIds, [3]);
+  assert.equal(plan.entryIds.length, 10_000);
+});
+
+test('findStrayEntries asks for every corpus entry status', async () => {
+  const filters = [];
+  await findStrayEntries(async (filter) => { filters.push(filter); return { objects: [] }; }, { before: 100 });
+  assert.equal(filters[0].statusIn, '-1,-2,0,1,2,7,4');
 });

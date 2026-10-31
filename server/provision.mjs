@@ -1014,10 +1014,11 @@ export async function withRollback(task, undo, log = console.error) {
 }
 
 /** True for a failure worth another try: a 5xx or 429 response, or no HTTP response at all (the
- * SDK already retried a dropped connection). A 4xx or an OVP exception will fail the same way again. */
+ * SDK already retried a dropped connection, and reports a timeout as `status: 0`). A 4xx or an OVP
+ * exception will fail the same way again. */
 export function isTransientError(e) {
   if (typeof e?.status === 'number' && e.status > 0) return e.status >= 500 || e.status === 429;
-  return e?.code === 'server_error' || e?.code === 'rate_limited' || (!e?.status && !e?.code);
+  return e?.status === 0 || e?.code === 'server_error' || e?.code === 'rate_limited' || (!e?.status && !e?.code);
 }
 
 /** Run `fn`, retrying transient failures up to `attempts` times in total with doubling backoff
@@ -1034,6 +1035,21 @@ export async function withRetry(fn, { attempts = 4, baseMs = 2_000, label = 'cal
       await wait(delay);
     }
   }
+}
+
+/** `withRetry` for an upload that creates an entry in several steps. A try that times out can still
+ * have created the entry, and a retry would then add a second one. After every failed try, `sweep`
+ * removes entries that try left behind, so a retry starts clean. A failing `sweep` is logged and
+ * never hides the upload error. `sweep` and the `withRetry` options are injectable for tests. */
+export async function uploadWithoutOrphans(upload, sweep, { log = console.log, ...retry } = {}) {
+  return withRetry(async () => {
+    try {
+      return await upload();
+    } catch (e) {
+      await Promise.resolve().then(sweep).catch((s) => log(`  … could not clear a stray entry: ${s.code || s.message}`));
+      throw e;
+    }
+  }, { log, ...retry });
 }
 
 const ENTRY_STATUS_POLL_INTERVAL_MS = 30_000;
@@ -1186,18 +1202,36 @@ async function wireKnowledge(admin, docs, manifest, created = { recordIds: [], c
   console.log('✓ knowledge record', record.id);
 
   const entryIds = created.entryIds;
+  const startedAt = await ovp(admin, 'system', 'getTime'); // platform clock, so no skew
   for (const doc of docs) {
     const sections = splitIntoSections(doc.markdown, doc, resolvePath(manifest, doc.url));
     const baseName = `${TAG}-${doc.file.replace(/\//g, '-')}`;
     for (let i = 0; i < sections.length; i++) {
       const name = sections.length > 1 ? `${baseName}-${i}` : baseName;
-      const uploaded = await withRetry(() => kaltura.knowledge.uploadMarkdown({ markdown: sections[i], name, categoryId: category.id }, admin), { label: `upload ${name}` });
+      const uploaded = await uploadWithoutOrphans(
+        () => kaltura.knowledge.uploadMarkdown({ markdown: sections[i], name, categoryId: category.id }, admin),
+        () => sweepStrayUploads(admin, name, startedAt, entryIds, category.id),
+        { label: `upload ${name}` },
+      );
       entryIds.push(uploaded.entryId);
     }
     console.log(`✓ uploaded ${doc.file} to knowledge category (${sections.length} chunk${sections.length === 1 ? '' : 's'})`);
   }
 
   return { categoryId: category.id, recordId: record.id, entryIds };
+}
+
+/** Delete entries a failed upload try left behind (see strayUploadIds). Throws if the delete fails. */
+async function sweepStrayUploads(admin, name, since, keep, categoryId) {
+  const { objects = [] } = await ovp(admin, 'baseentry', 'list', {
+    filter: { objectType: 'KalturaBaseEntryFilter', nameEqual: name, statusIn: KNOWLEDGE_ENTRY_STATUSES, createdAtGreaterThanOrEqual: since },
+    pager: { objectType: 'KalturaFilterPager', pageSize: 50 },
+  });
+  const stray = strayUploadIds(objects, keep, categoryId);
+  if (!stray.length) return;
+  console.log(`  … removing ${stray.length} stray entr${stray.length === 1 ? 'y' : 'ies'} from a failed ${name} upload`);
+  const failures = await deleteKnowledge(admin, { entryIds: stray });
+  if (failures.length) throw new Error(summarizeDeleteFailures(failures));
 }
 
 /** Store the docs fingerprint on the knowledge category (`referenceId`). The next --reuse run
@@ -1306,28 +1340,226 @@ export function summarizeDeleteFailures(failures, max = 10) {
   return `${failures.length} knowledge delete(s) failed: ${shown}${failures.length > max ? `; and ${failures.length - max} more` : ''}`;
 }
 
+const DELETE_BATCH = 10; // a bigger multirequest gets most of its delete calls rejected with ACTION_BLOCKED
+const DELETE_PAUSE_MS = 500;
+const RETRYABLE_DELETE_CODES = new Set(['ACTION_BLOCKED', 'NO_RESULT']);
+
+/** Run delete `calls` in small multirequests. A call the platform throttles (`ACTION_BLOCKED`) or
+ * drops, and a whole batch that fails to send, is tried again after a doubling pause, up to `rounds`
+ * rounds in total. Other failures are final at once. Returns the failures that are left. */
+async function runDeletes(calls, { multirequest, wait, batchSize, rounds, baseMs }) {
+  const failures = [];
+  const idOf = (c) => c.entryId ?? c.id;
+  const kindOf = (c) => (c.service === 'category' ? 'category' : 'entry');
+  let pending = calls;
+  for (let round = 1; pending.length; round++) {
+    const blocked = [];
+    for (let i = 0; i < pending.length; i += batchSize) {
+      if (i) await wait(DELETE_PAUSE_MS);
+      const batch = pending.slice(i, i + batchSize);
+      try {
+        for (const f of multirequestFailures(batch, await multirequest(batch))) (RETRYABLE_DELETE_CODES.has(f.code) ? blocked : failures).push(f);
+      } catch (e) {
+        blocked.push(...batch.map((c) => ({ kind: kindOf(c), id: idOf(c), code: e.message })));
+      }
+    }
+    if (!blocked.length) break;
+    if (round >= rounds) { failures.push(...blocked); break; }
+    await wait(baseMs * 2 ** (round - 1));
+    const again = new Set(blocked.map((f) => String(f.id)));
+    pending = pending.filter((c) => again.has(String(idOf(c))));
+  }
+  return failures;
+}
+
 /**
  * Delete a corpus's entries and categories. Used three ways: `cleanup()` on the intellect's current
  * corpus, `provision()` on the outgoing corpus once the intellect has been repointed to the new
  * one, and `provision()` on a half-built new corpus when the build or the repoint fails.
+ * Entries go first, in small paced batches (see runDeletes). The categories are deleted only when
+ * every entry delete worked: a deleted category does not delete its entries, so a category kept
+ * with its entries can still be found and pruned later (`--prune-orphans`).
  * It never deletes the knowledge record itself. Every redeploy builds a new record, and the old one
  * is left unlinked and empty (see ARCHITECTURE.md "Known limitations").
- * Never throws. Returns every failure as `{kind: 'entry'|'category'|'batch', id, code}` and logs
- * them as one summary. `multirequest` and `log` are injectable for tests.
+ * Never throws. Returns every failure as `{kind: 'entry'|'category', id, code}` and logs them as
+ * one summary. `multirequest`, `log`, `wait`, `batchSize`, `rounds` and `baseMs` are injectable
+ * for tests.
  */
 export async function deleteKnowledge(admin, { categoryIds = [], entryIds = [] } = {}, {
   multirequest = (calls) => ovpMultirequest(admin, calls), log = console.error,
+  wait = sleep, batchSize = DELETE_BATCH, rounds = 4, baseMs = 5_000,
 } = {}) {
-  const failures = [];
-  if (categoryIds.length) {
-    const calls = entryIds.map((entryId) => ({ service: 'baseentry', action: 'delete', entryId }));
-    for (const id of categoryIds) calls.push({ service: 'category', action: 'delete', id });
-    try {
-      failures.push(...multirequestFailures(calls, await multirequest(calls)));
-    } catch (e) { failures.push({ kind: 'batch', id: `${entryIds.length} entries, categories ${categoryIds.join(',')}`, code: e.message }); }
+  const opts = { multirequest, wait, batchSize, rounds, baseMs };
+  const failures = await runDeletes(entryIds.map((entryId) => ({ service: 'baseentry', action: 'delete', entryId })), opts);
+  if (!failures.length) {
+    failures.push(...await runDeletes(categoryIds.map((id) => ({ service: 'category', action: 'delete', id })), opts));
+  } else if (categoryIds.length) {
+    log(`⚠ kept categor${categoryIds.length === 1 ? 'y' : 'ies'} ${categoryIds.join(',')} because some entries are not deleted. Run --prune-orphans later`);
   }
   if (failures.length) log(`⚠ ${summarizeDeleteFailures(failures)}`);
   return failures;
+}
+
+const PRUNE_MIN_AGE_S = 3_600; // never touch what a running build may still be uploading
+const LIST_PAGE = 500;
+const LIST_CAP = 10_000; // baseentry.list returns at most this many results per query
+const KNOWLEDGE_ENTRY_STATUSES = '-1,-2,0,1,2,7,4'; // every status a corpus entry can hold, error and no-content included
+const PRUNE_TOKEN_TTL_S = 6 * 3_600; // a 14,000-delete run outlasts the default 1 h token
+const LIST_SINCE = 1_577_836_800; // 2020-01-01. The platform reads a smaller createdAt bound as "seconds before now"
+
+/** Ids of the entries a failed upload try left behind: entries named `name`, created since the
+ * build started, that are not in `keep` (the entries this build uploaded and recorded) and that sit
+ * in no category or in this build's own `categoryId`. An entry of an overlapping build is in that
+ * build's category, so it is never touched. */
+export function strayUploadIds(entries, keep, categoryId) {
+  const own = (e) => !e.categoriesIds || String(e.categoriesIds).split(',').includes(String(categoryId));
+  return entries.filter((e) => !keep.includes(e.id) && own(e)).map((e) => e.id);
+}
+
+/** What `--prune-orphans` deletes from the entries of the unlinked categories. An entry also in a
+ * linked category is kept (the category delete leaves it alone). An entry under an hour old is kept,
+ * and so is its category, so a later run can finish. `categories` are `{id, entries}` with entry rows
+ * from baseentry.list; `before` is epoch seconds. */
+export function planCategoryPrune(categories, linkedIds, before) {
+  const entryIds = [];
+  const categoryIds = [];
+  const keptCategoryIds = [];
+  for (const { id, entries } of categories) {
+    const live = (e) => String(e.categoriesIds || '').split(',').some((c) => linkedIds.has(Number(c)));
+    const recent = entries.some((e) => e.createdAt >= before);
+    entryIds.push(...entries.filter((e) => !live(e) && e.createdAt < before).map((e) => e.id));
+    (recent ? keptCategoryIds : categoryIds).push(Number(id));
+  }
+  return { entryIds, categoryIds, keptCategoryIds };
+}
+
+/** The knowledge categories no intellect links and that are older than `before` (epoch seconds).
+ * `categories` are OVP category rows, `linkedIds` the category ids any intellect still uses. */
+export function staleKnowledgeCategories(categories, linkedIds, before) {
+  return categories.filter((c) => c.name?.startsWith(`${TAG}-knowledge-`) && !linkedIds.has(Number(c.id)) && c.createdAt < before);
+}
+
+/** Ids of the document entries named `docs-site-avatar-*` that sit in no category and were created
+ * before `before` (epoch seconds). A corpus entry is always in its category, so these are left
+ * over from a failed upload or a delete that removed the category first. `list(filter, pager)` is
+ * the baseentry.list call. It pages through createdAt windows because a query returns at most
+ * 10,000 results. */
+export async function findStrayEntries(list, { before, since = LIST_SINCE }) {
+  const stray = [];
+  const seen = new Set();
+  for (let from = since; ;) {
+    const rows = [];
+    for (let pageIndex = 1; rows.length < LIST_CAP; pageIndex++) {
+      const filter = { objectType: 'KalturaBaseEntryFilter', typeEqual: '10', statusIn: KNOWLEDGE_ENTRY_STATUSES, createdAtGreaterThanOrEqual: from, createdAtLessThanOrEqual: before, orderBy: '+createdAt' };
+      const { objects = [] } = await list(filter, { objectType: 'KalturaFilterPager', pageSize: LIST_PAGE, pageIndex });
+      rows.push(...objects);
+      if (objects.length < LIST_PAGE) break;
+    }
+    const fresh = rows.filter((e) => !seen.has(e.id));
+    for (const e of fresh) {
+      seen.add(e.id);
+      if (e.name?.startsWith(`${TAG}-`) && !e.categories && !e.categoriesIds) stray.push(e.id);
+    }
+    if (rows.length < LIST_CAP) return stray;
+    if (!fresh.length) throw new Error(`more than ${LIST_CAP} entries share the createdAt second ${from}, so the scan cannot page past them`);
+    from = rows.at(-1).createdAt;
+  }
+}
+
+/** Reads what is linked and what is stale, and returns the delete plan. It throws instead of
+ * returning a plan when it cannot prove the live corpus is protected: the live intellect
+ * (`liveConfigId`) must be in the list, link at least one record, and that record must name at
+ * least one category. A missing piece would make every category look unlinked. `io` supplies
+ * `intellects()` (async iterable), `getLinkage(id)`, `getRecord(id)`, `categories()`,
+ * `categoryEntries(id)` and `strays(before)`. */
+export async function buildPrunePlan(io, { before, liveConfigId }) {
+  if (!liveConfigId) throw new Error('server/agent.json has no configId, so the live corpus cannot be protected. Nothing was deleted');
+  const linkedIds = new Set();
+  let liveSeen = false;
+  let liveLinks = 0;
+  for await (const intellect of io.intellects()) {
+    const isLive = String(intellect.id) === String(liveConfigId);
+    liveSeen ||= isLive;
+    const { knowledgeIds = [] } = (await io.getLinkage(intellect.id)) || {};
+    for (const id of knowledgeIds) {
+      const record = await io.getRecord(id);
+      if (!Array.isArray(record?.config?.sources)) throw new Error(`knowledge record ${id} has no sources, so its categories are unknown. Nothing was deleted`);
+      for (const s of record.config.sources) {
+        for (const c of (s.categoryIds || []).map(Number).filter(Number.isFinite)) {
+          linkedIds.add(c);
+          if (isLive) liveLinks++;
+        }
+      }
+    }
+  }
+  if (!liveSeen) throw new Error(`the live intellect ${liveConfigId} is not in the intellect list. Nothing was deleted`);
+  if (!liveLinks) throw new Error(`the live intellect ${liveConfigId} links no knowledge category. Nothing was deleted`);
+
+  const stale = staleKnowledgeCategories(await io.categories(), linkedIds, before);
+  const withEntries = [];
+  for (const c of stale) withEntries.push({ id: c.id, entries: await io.categoryEntries(Number(c.id)) });
+  const plan = planCategoryPrune(withEntries, linkedIds, before);
+  // A listing at the cap may hide entries. Delete what was seen and keep the category for the next run.
+  const capped = new Set(withEntries.filter((c) => c.entries.length >= LIST_CAP).map((c) => Number(c.id)));
+  return {
+    linkedIds,
+    entryIds: plan.entryIds,
+    categoryIds: plan.categoryIds.filter((id) => !capped.has(id)),
+    keptCategoryIds: plan.keptCategoryIds,
+    cappedCategoryIds: plan.categoryIds.filter((id) => capped.has(id)),
+    stray: await io.strays(before),
+  };
+}
+
+/** `--prune-orphans`: delete the Nova knowledge entries and categories nothing links any more.
+ * Dry run lists the counts and deletes nothing. */
+async function pruneOrphans({ dryRun }) {
+  const saved = JSON.parse(await readFile(OUT, 'utf8').catch(() => '{}'));
+  const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision', ttlSeconds: PRUNE_TOKEN_TTL_S });
+  const before = await ovp(admin, 'system', 'getTime') - PRUNE_MIN_AGE_S;
+  const io = {
+    intellects: () => kaltura.intellects.list(admin),
+    getLinkage: (id) => kaltura.knowledge.getLinkage(id, admin),
+    getRecord: (id) => kaltura.knowledge.getRecord(id, admin),
+    async categories() {
+      const rows = [];
+      for (let pageIndex = 1; ; pageIndex++) {
+        const { objects = [] } = await ovp(admin, 'category', 'list', {
+          filter: { objectType: 'KalturaCategoryFilter', nameOrReferenceIdStartsWith: `${TAG}-knowledge-` },
+          pager: { objectType: 'KalturaFilterPager', pageSize: LIST_PAGE, pageIndex },
+        });
+        rows.push(...objects);
+        if (objects.length < LIST_PAGE) return rows;
+      }
+    },
+    async categoryEntries(id) {
+      const entries = [];
+      for await (const e of kaltura.knowledge.listCategoryEntries(id, admin, { pageSize: LIST_PAGE })) entries.push(e);
+      return entries;
+    },
+    strays: (b) => findStrayEntries((filter, pager) => ovp(admin, 'baseentry', 'list', { filter, pager }), { before: b }),
+  };
+  let plan;
+  try {
+    plan = await buildPrunePlan(io, { before, liveConfigId: saved.configId });
+  } catch (err) {
+    console.error(`✗ ${err.message}`);
+    process.exitCode = 1;
+    return;
+  }
+  const { linkedIds, entryIds, categoryIds, keptCategoryIds, cappedCategoryIds, stray } = plan;
+  const plural = (n) => (n === 1 ? 'y' : 'ies');
+  console.log(`${dryRun ? '(dry run) would delete' : 'deleting'}: ${categoryIds.length} unlinked categor${plural(categoryIds.length)}, ${entryIds.length} entries from the unlinked categories, and ${stray.length} entries that are in no category. Linked categories kept: ${[...linkedIds].join(',') || 'none'}`);
+  if (keptCategoryIds.length) console.log(`  kept categor${plural(keptCategoryIds.length)} ${keptCategoryIds.join(',')}: an entry is under an hour old. Run again later`);
+  if (cappedCategoryIds.length) console.log(`  kept categor${plural(cappedCategoryIds.length)} ${cappedCategoryIds.join(',')}: ${LIST_CAP} or more entries, so the list may be partial. Run again until none are left`);
+  if (dryRun) return;
+  // Strays go first and alone, so one stuck entry cannot block a category delete.
+  const failures = [
+    ...await deleteKnowledge(admin, { entryIds: stray }),
+    ...await deleteKnowledge(admin, { categoryIds, entryIds }),
+  ];
+  if (failures.length) { process.exitCode = 1; return; }
+  console.log(cappedCategoryIds.length ? '✓ pruned what was listed. Run again to finish the large categories' : '✓ pruned');
 }
 
 export const VERIFY_WAIT_DEFAULT_MIN = 45;
@@ -1457,13 +1689,17 @@ const USAGE = `Usage: node server/provision.mjs [options]
   --cleanup                             Delete the agent/avatar/intellect recorded in
                                          server/agent.json plus the knowledge corpus the
                                          intellect links (discovered live, not from the file)
+  --prune-orphans                       Delete Nova knowledge entries and categories that no
+                                         intellect links (left by failed or throttled
+                                         deploys). Skips anything under an hour old
   --dry-run                             With --cleanup: list what would be deleted, make
-                                         no API calls
+                                         no API calls. With --prune-orphans: list the counts,
+                                         delete nothing
   --only <types>                        With --cleanup: limit to a comma-separated subset
                                          of ${CLEANUP_TARGETS.join(',')}
   --help                                Show this message and exit (no API calls made)`;
 
-const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--knowledge-only', '--verify-knowledge', '--index-wait-minutes', '--digest', '--digest-plan', '--cleanup', '--dry-run', '--only', '--help'];
+const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--knowledge-only', '--verify-knowledge', '--index-wait-minutes', '--digest', '--digest-plan', '--cleanup', '--prune-orphans', '--dry-run', '--only', '--help'];
 
 function main() {
   const args = stripSiteDirFlag(process.argv.slice(2));
@@ -1473,7 +1709,6 @@ function main() {
     console.error(`✗ unknown flag(s): ${unknown.join(', ')}\n\n${USAGE}`);
     process.exit(1);
   }
-  if (args.includes('--verify-knowledge')) return verifyKnowledge(args);
   if (args.includes('--digest') || args.includes('--digest-plan')) {
     const others = args.filter((a) => a.startsWith('--') && a !== '--digest' && a !== '--digest-plan');
     if (args.includes('--digest') && args.includes('--digest-plan')) {
@@ -1486,9 +1721,18 @@ function main() {
     }
     return digest({ apply: args.includes('--digest') });
   }
+  if (args.includes('--prune-orphans')) {
+    const others = args.filter((a) => a.startsWith('--') && a !== '--prune-orphans' && a !== '--dry-run');
+    if (others.length) {
+      console.error(`✗ --prune-orphans runs alone (or with --dry-run), not with ${others.join(', ')}\n\n${USAGE}`);
+      process.exit(1);
+    }
+    return pruneOrphans({ dryRun: args.includes('--dry-run') });
+  }
+  if (args.includes('--verify-knowledge')) return verifyKnowledge(args);
   if (!args.includes('--cleanup')) {
     if (args.includes('--dry-run') || args.includes('--only')) {
-      console.error(`✗ --dry-run/--only only apply with --cleanup\n\n${USAGE}`);
+      console.error(`✗ --dry-run/--only only apply with --cleanup or --prune-orphans\n\n${USAGE}`);
       process.exit(1);
     }
     return provision();

@@ -40,6 +40,7 @@
 | `fetch-sdk` | `node scripts/fetch-sdk.mjs --force` | write, idempotent (overwrites `vendor/sdk/` with the same tag's content) |
 | `provision` | `node server/provision.mjs` | write, NOT idempotent (creates a new intellect, avatar, agent, and knowledge base every run, and overwrites `server/agent.json`. Use `--reuse`, `--agent-id`, and `--avatar-id` to update in place) |
 | `cleanup` | `node server/provision.mjs --cleanup` | write, destructive |
+| `prune-orphans` | `node server/provision.mjs --prune-orphans` | write, destructive, idempotent (`--dry-run` is read-only) |
 | `test:eval:unit` | `node --test tests/eval/probes.test.mjs tests/eval/provision.test.mjs tests/eval/chat-transport.test.mjs tests/eval/personas.test.mjs tests/eval/workflows.test.mjs tests/eval/digest.test.mjs` | read |
 | `eval` | `node tests/eval/run.mjs` | read (drives the live agent conversationally and writes only to `tests/eval/artifacts/`) |
 | `eval:dashboard` | `node tests/eval/dashboard/server.mjs` | read (starts a local server. Each run it launches has the same capability as `eval`) |
@@ -61,11 +62,12 @@
 | `--digest-plan` | Read-only. Print `create`, `update`, or `unchanged` for each digest object, with names and ids only. Needs `DIGEST_RECIPIENTS` |
 | `--digest` | Create or update the digest objects and record their ids in `server/agent.json`. Idempotent. Needs `DIGEST_RECIPIENTS` |
 | `--cleanup` | Delete the agent, avatar, and intellect recorded in `server/agent.json`, plus the entries and category of the corpus the intellect links (discovered live). The knowledge record itself stays |
-| `--dry-run` | With `--cleanup`: list what would be deleted and make no API calls |
+| `--prune-orphans` | Delete `docs-site-avatar-*` document entries that sit in no category, and unlinked `docs-site-avatar-knowledge-*` categories with their entries. Keeps anything an intellect links and anything under an hour old. Exits non-zero with no delete if the intellect in `server/agent.json` is not listed or links no category. Keeps a category with 10,000 or more entries until a later run. Runs alone, or with `--dry-run` |
+| `--dry-run` | With `--cleanup`: list what would be deleted and make no API calls. With `--prune-orphans`: print the counts and delete nothing (read calls only) |
 | `--only <types>` | With `--cleanup`: limit to a comma-separated subset of `agent,avatar,intellect,knowledge` |
 | `--help` | Print usage and exit, with no API calls |
 
-`--digest` and `--digest-plan` run alone. Combined with another flag (or with each other) they exit non-zero. An unrecognized `--flag` exits non-zero with usage. `--dry-run` and `--only` outside `--cleanup` also exit non-zero.
+`--digest` and `--digest-plan` run alone. Combined with another flag (or with each other) they exit non-zero. An unrecognized `--flag` exits non-zero with usage. `--dry-run` and `--only` outside `--cleanup` (and `--dry-run` outside `--prune-orphans`) also exit non-zero. `--prune-orphans` combined with any other flag but `--dry-run` (including `--verify-knowledge`) exits non-zero.
 
 ## `tests/eval/run.mjs` flags
 

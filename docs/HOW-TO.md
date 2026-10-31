@@ -88,6 +88,19 @@ node server/provision.mjs --cleanup --only agent,avatar
 
 `--only` limits the scope to a comma-separated subset of `agent,avatar,intellect,knowledge`.
 
+## Prune orphaned knowledge entries
+
+A failed or throttled delete can leave knowledge entries behind. List them first (read calls only):
+
+```bash
+node server/provision.mjs --prune-orphans --dry-run
+node server/provision.mjs --prune-orphans
+```
+
+It deletes `docs-site-avatar-*` document entries that sit in no category, and unlinked `docs-site-avatar-knowledge-*` categories with their entries. Anything an intellect links, and anything under an hour old, is kept.
+
+It stops with no delete unless the intellect in `server/agent.json` is listed and links a category. A category with 10,000 or more entries is kept after its entries are deleted. Run the command again until it reports none left.
+
 ## Audit and clean up leaked knowledge records
 
 ```bash
