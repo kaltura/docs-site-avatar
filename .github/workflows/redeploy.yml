@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - server/provision.mjs
+      - scripts/fetch-sdk.mjs
   # Nightly, so a docs deploy reaches the knowledge base within a day. A run whose docs hash
   # matches skips the upload, so this is cheap. It runs unattended in `production-nightly`.
   schedule:
