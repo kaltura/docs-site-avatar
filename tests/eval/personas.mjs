@@ -395,7 +395,8 @@ export function buildPersonas(siteData) {
       turns: [
         {
           prompt: 'Which lifecycle action types can I create?',
-          relevanceAll: ['triggerInsightSettingsKai', 'sendInsightEmail', 'triggerDtcKai', 'createBadges'],
+          // Nova speaks identifiers naturally (replyFormat), so each type may also come as words.
+          relevanceAll: ['triggerInsightSettingsKai|trigger insight settings kai', 'sendInsightEmail|send insight email', 'triggerDtcKai|trigger dtc kai', 'createBadges|create badges'],
           // A negated mention ("there is no webhook action") is a correct answer.
           relevanceNone: ['(?<!\\b(?:no|not)\\s)\\bwebhooks?\\b', '(?<!\\b(?:no|not)\\s)\\btag(?:ging)? (?:a )?thread', 'phase\\s*(?:2|two)'],
         },
