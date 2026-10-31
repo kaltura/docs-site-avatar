@@ -17,7 +17,7 @@ const {
   targetArgsLine, rewriteTargetMarkup, SIGNUP_LINK_TOOL_NAME, signupLinkTool,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
   chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry, uploadWithoutOrphans,
-  strayUploadIds, staleKnowledgeCategories, findStrayEntries,
+  strayUploadIds, staleKnowledgeCategories, findStrayEntries, planCategoryPrune,
   reportUnconfirmed, reportLeftoverDeletes, failedEntriesProblem, canReuseCorpus, sealNewCorpus,
   multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem, waitForKnowledgeReady, verifyWaitMs,
 } = await import('../../server/provision.mjs');
@@ -967,8 +967,17 @@ test('uploadWithoutOrphans: a permanent error is swept once and not retried', as
   assert.deepEqual([uploads, sweeps], [1, 1]);
 });
 
-test('strayUploadIds: keeps out the entries this build already recorded', () => {
-  assert.deepEqual(strayUploadIds([{ id: 'a' }, { id: 'b' }, { id: 'c' }], ['b']), ['a', 'c']);
+test('strayUploadIds: keeps out recorded entries and entries of another build', () => {
+  const rows = [{ id: 'a' }, { id: 'b', categoriesIds: '7' }, { id: 'c', categoriesIds: '7,9' }, { id: 'd', categoriesIds: '8' }];
+  assert.deepEqual(strayUploadIds(rows, ['b'], 7), ['a', 'c']);
+});
+
+test('planCategoryPrune: skips entries shared with a linked category and entries under an hour old', () => {
+  const cats = [
+    { id: 1, entries: [{ id: 'old', createdAt: 10 }, { id: 'shared', createdAt: 10, categoriesIds: '1,99' }] },
+    { id: 2, entries: [{ id: 'old2', createdAt: 10 }, { id: 'fresh', createdAt: 5_000 }] },
+  ];
+  assert.deepEqual(planCategoryPrune(cats, new Set([99]), 1_000), { entryIds: ['old', 'old2'], categoryIds: [1], keptCategoryIds: [2] });
 });
 
 test('staleKnowledgeCategories: only old, unlinked docs-site-avatar-knowledge categories', () => {
@@ -995,10 +1004,9 @@ test('findStrayEntries: picks categoryless Nova entries and pages past the 10,00
   assert.deepEqual(stray.sort(), expected.sort());
 });
 
-test('findStrayEntries: stops when a whole second holds more than the cap (no endless loop)', async () => {
+test('findStrayEntries: fails loudly when a whole second holds more than the cap', async () => {
   const list = async (filter, pager) => ({ objects: pager.pageIndex <= 20 ? Array.from({ length: pager.pageSize }, (_, i) => ({ id: `s${pager.pageIndex}-${i}`, createdAt: 5, name: 'x', categories: 'c' })) : [] });
-  const stray = await findStrayEntries(list, { before: 10, since: 0 });
-  assert.deepEqual(stray, []);
+  await assert.rejects(findStrayEntries(list, { before: 10, since: 0 }), /share the createdAt second/);
 });
 
 test('summarizeDeleteFailures: names the first few and counts the rest', () => {

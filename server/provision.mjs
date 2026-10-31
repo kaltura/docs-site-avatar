@@ -1210,7 +1210,7 @@ async function wireKnowledge(admin, docs, manifest, created = { recordIds: [], c
       const name = sections.length > 1 ? `${baseName}-${i}` : baseName;
       const uploaded = await uploadWithoutOrphans(
         () => kaltura.knowledge.uploadMarkdown({ markdown: sections[i], name, categoryId: category.id }, admin),
-        () => sweepStrayUploads(admin, name, startedAt, entryIds),
+        () => sweepStrayUploads(admin, name, startedAt, entryIds, category.id),
         { label: `upload ${name}` },
       );
       entryIds.push(uploaded.entryId);
@@ -1222,12 +1222,12 @@ async function wireKnowledge(admin, docs, manifest, created = { recordIds: [], c
 }
 
 /** Delete entries a failed upload try left behind (see strayUploadIds). Throws if the delete fails. */
-async function sweepStrayUploads(admin, name, since, keep) {
+async function sweepStrayUploads(admin, name, since, keep, categoryId) {
   const { objects = [] } = await ovp(admin, 'baseentry', 'list', {
     filter: { objectType: 'KalturaBaseEntryFilter', nameEqual: name, createdAtGreaterThanOrEqual: since },
     pager: { objectType: 'KalturaFilterPager', pageSize: 50 },
   });
-  const stray = strayUploadIds(objects, keep);
+  const stray = strayUploadIds(objects, keep, categoryId);
   if (!stray.length) return;
   console.log(`  … removing ${stray.length} stray entr${stray.length === 1 ? 'y' : 'ies'} from a failed ${name} upload`);
   const failures = await deleteKnowledge(admin, { entryIds: stray });
@@ -1406,9 +1406,29 @@ const LIST_CAP = 10_000; // baseentry.list returns at most this many results per
 const LIST_SINCE = 1_577_836_800; // 2020-01-01. The platform reads a smaller createdAt bound as "seconds before now"
 
 /** Ids of the entries a failed upload try left behind: entries named `name`, created since the
- * build started, that are not in `keep` (the entries this build uploaded and recorded). */
-export function strayUploadIds(entries, keep) {
-  return entries.map((e) => e.id).filter((id) => !keep.includes(id));
+ * build started, that are not in `keep` (the entries this build uploaded and recorded) and that sit
+ * in no category or in this build's own `categoryId`. An entry of an overlapping build is in that
+ * build's category, so it is never touched. */
+export function strayUploadIds(entries, keep, categoryId) {
+  const own = (e) => !e.categoriesIds || String(e.categoriesIds).split(',').includes(String(categoryId));
+  return entries.filter((e) => !keep.includes(e.id) && own(e)).map((e) => e.id);
+}
+
+/** What `--prune-orphans` deletes from the entries of the unlinked categories. An entry also in a
+ * linked category is kept (the category delete leaves it alone). An entry under an hour old is kept,
+ * and so is its category, so a later run can finish. `categories` are `{id, entries}` with entry rows
+ * from baseentry.list; `before` is epoch seconds. */
+export function planCategoryPrune(categories, linkedIds, before) {
+  const entryIds = [];
+  const categoryIds = [];
+  const keptCategoryIds = [];
+  for (const { id, entries } of categories) {
+    const live = (e) => String(e.categoriesIds || '').split(',').some((c) => linkedIds.has(Number(c)));
+    const recent = entries.some((e) => e.createdAt >= before);
+    entryIds.push(...entries.filter((e) => !live(e) && e.createdAt < before).map((e) => e.id));
+    (recent ? keptCategoryIds : categoryIds).push(Number(id));
+  }
+  return { entryIds, categoryIds, keptCategoryIds };
 }
 
 /** The knowledge categories no intellect links and that are older than `before` (epoch seconds).
@@ -1438,7 +1458,8 @@ export async function findStrayEntries(list, { before, since = LIST_SINCE }) {
       seen.add(e.id);
       if (e.name?.startsWith(`${TAG}-`) && !e.categories && !e.categoriesIds) stray.push(e.id);
     }
-    if (!fresh.length || rows.length < LIST_CAP) return stray;
+    if (rows.length < LIST_CAP) return stray;
+    if (!fresh.length) throw new Error(`more than ${LIST_CAP} entries share the createdAt second ${from}, so the scan cannot page past them`);
     from = rows.at(-1).createdAt;
   }
 }
@@ -1457,18 +1478,29 @@ async function pruneOrphans({ dryRun }) {
       for (const s of record?.config?.sources || []) (s.categoryIds || []).map(Number).filter(Number.isFinite).forEach((c) => linkedIds.add(c));
     }
   }
-  const rows = await ovp(admin, 'category', 'list', {
-    filter: { objectType: 'KalturaCategoryFilter', nameOrReferenceIdStartsWith: `${TAG}-knowledge-` },
-    pager: { objectType: 'KalturaFilterPager', pageSize: 500 },
-  });
-  const stale = staleKnowledgeCategories(rows.objects || [], linkedIds, before);
-  const entryIds = [];
-  for (const c of stale) for await (const e of kaltura.knowledge.listCategoryEntries(Number(c.id), admin, { pageSize: 500 })) entryIds.push(e.id);
+  const rows = [];
+  for (let pageIndex = 1; ; pageIndex++) {
+    const { objects = [] } = await ovp(admin, 'category', 'list', {
+      filter: { objectType: 'KalturaCategoryFilter', nameOrReferenceIdStartsWith: `${TAG}-knowledge-` },
+      pager: { objectType: 'KalturaFilterPager', pageSize: LIST_PAGE, pageIndex },
+    });
+    rows.push(...objects);
+    if (objects.length < LIST_PAGE) break;
+  }
+  const stale = staleKnowledgeCategories(rows, linkedIds, before);
+  const withEntries = [];
+  for (const c of stale) {
+    const entries = [];
+    for await (const e of kaltura.knowledge.listCategoryEntries(Number(c.id), admin, { pageSize: LIST_PAGE })) entries.push(e);
+    withEntries.push({ id: c.id, entries });
+  }
+  const { entryIds, categoryIds, keptCategoryIds } = planCategoryPrune(withEntries, linkedIds, before);
   const stray = await findStrayEntries((filter, pager) => ovp(admin, 'baseentry', 'list', { filter, pager }), { before });
 
-  console.log(`${dryRun ? '(dry run) would delete' : 'deleting'}: ${stale.length} unlinked categor${stale.length === 1 ? 'y' : 'ies'} with ${entryIds.length} entries, and ${stray.length} entries that are in no category. Linked categories kept: ${[...linkedIds].join(',') || 'none'}`);
+  console.log(`${dryRun ? '(dry run) would delete' : 'deleting'}: ${categoryIds.length} unlinked categor${categoryIds.length === 1 ? 'y' : 'ies'}, ${entryIds.length} entries from the unlinked categories, and ${stray.length} entries that are in no category. Linked categories kept: ${[...linkedIds].join(',') || 'none'}`);
+  if (keptCategoryIds.length) console.log(`  kept categor${keptCategoryIds.length === 1 ? 'y' : 'ies'} ${keptCategoryIds.join(',')}: an entry is under an hour old. Run again later`);
   if (dryRun) return;
-  const failures = await deleteKnowledge(admin, { categoryIds: stale.map((c) => Number(c.id)), entryIds: [...entryIds, ...stray] });
+  const failures = await deleteKnowledge(admin, { categoryIds, entryIds: [...entryIds, ...stray] });
   if (failures.length) { process.exitCode = 1; return; }
   console.log('✓ pruned');
 }
