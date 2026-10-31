@@ -757,6 +757,7 @@ test('accuracy: token refresh names setToken and rejects an invented expiry even
 test('accuracy: lifecycle names all four creatable types and no invented one', () => {
   const t = knowledgeTurn('Which lifecycle action types can I create');
   assert.equal(probeRelevance(t, 'You can create triggerInsightSettingsKai, sendInsightEmail, triggerDtcKai and createBadges. There is no webhook action.').pass, true);
+  assert.equal(probeRelevance(t, 'You can create four types: trigger Insight Settings Kai, send Insight Email, trigger Dtc Kai, and create Badges.').pass, true);
   for (const b of [
     'You can create exactly three: triggerInsightSettingsKai, sendInsightEmail and triggerDtcKai.',
     'You can create triggerInsightSettingsKai, sendInsightEmail, triggerDtcKai and createBadges, plus a webhook action.',
