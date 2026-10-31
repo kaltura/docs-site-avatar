@@ -118,6 +118,9 @@ const REFUSAL_PHRASES = [
   // pricing", a fuller verb phrase than the narrower "cannot provide any pricing" above.
   'cannot provide any information regarding pricing',
   'cannot provide any information regarding licensing',
+  // seen live: "I cannot provide any dollar figures or pricing examples, even as a placeholder" —
+  // a made-up-figure-pressure turn refused with no figure, phrased around "dollar figures".
+  'cannot provide any dollar figures',
   // the account-manager/sales@kaltura.com redirect obeyRules now points to, replacing the
   // older corp.kaltura.com pointer. Scoped to "kaltura account manager" rather than the bare
   // "account manager" — the bare phrase is generic enough to false-match a non-refusal reply
