@@ -1224,7 +1224,7 @@ async function wireKnowledge(admin, docs, manifest, created = { recordIds: [], c
 /** Delete entries a failed upload try left behind (see strayUploadIds). Throws if the delete fails. */
 async function sweepStrayUploads(admin, name, since, keep, categoryId) {
   const { objects = [] } = await ovp(admin, 'baseentry', 'list', {
-    filter: { objectType: 'KalturaBaseEntryFilter', nameEqual: name, createdAtGreaterThanOrEqual: since },
+    filter: { objectType: 'KalturaBaseEntryFilter', nameEqual: name, statusIn: KNOWLEDGE_ENTRY_STATUSES, createdAtGreaterThanOrEqual: since },
     pager: { objectType: 'KalturaFilterPager', pageSize: 50 },
   });
   const stray = strayUploadIds(objects, keep, categoryId);
@@ -1403,6 +1403,8 @@ export async function deleteKnowledge(admin, { categoryIds = [], entryIds = [] }
 const PRUNE_MIN_AGE_S = 3_600; // never touch what a running build may still be uploading
 const LIST_PAGE = 500;
 const LIST_CAP = 10_000; // baseentry.list returns at most this many results per query
+const KNOWLEDGE_ENTRY_STATUSES = '-1,-2,0,1,2,7,4'; // every status a corpus entry can hold, error and no-content included
+const PRUNE_TOKEN_TTL_S = 6 * 3_600; // a 14,000-delete run outlasts the default 1 h token
 const LIST_SINCE = 1_577_836_800; // 2020-01-01. The platform reads a smaller createdAt bound as "seconds before now"
 
 /** Ids of the entries a failed upload try left behind: entries named `name`, created since the
@@ -1448,7 +1450,7 @@ export async function findStrayEntries(list, { before, since = LIST_SINCE }) {
   for (let from = since; ;) {
     const rows = [];
     for (let pageIndex = 1; rows.length < LIST_CAP; pageIndex++) {
-      const filter = { objectType: 'KalturaBaseEntryFilter', typeEqual: '10', createdAtGreaterThanOrEqual: from, createdAtLessThanOrEqual: before, orderBy: '+createdAt' };
+      const filter = { objectType: 'KalturaBaseEntryFilter', typeEqual: '10', statusIn: KNOWLEDGE_ENTRY_STATUSES, createdAtGreaterThanOrEqual: from, createdAtLessThanOrEqual: before, orderBy: '+createdAt' };
       const { objects = [] } = await list(filter, { objectType: 'KalturaFilterPager', pageSize: LIST_PAGE, pageIndex });
       rows.push(...objects);
       if (objects.length < LIST_PAGE) break;
@@ -1464,45 +1466,100 @@ export async function findStrayEntries(list, { before, since = LIST_SINCE }) {
   }
 }
 
+/** Reads what is linked and what is stale, and returns the delete plan. It throws instead of
+ * returning a plan when it cannot prove the live corpus is protected: the live intellect
+ * (`liveConfigId`) must be in the list, link at least one record, and that record must name at
+ * least one category. A missing piece would make every category look unlinked. `io` supplies
+ * `intellects()` (async iterable), `getLinkage(id)`, `getRecord(id)`, `categories()`,
+ * `categoryEntries(id)` and `strays(before)`. */
+export async function buildPrunePlan(io, { before, liveConfigId }) {
+  if (!liveConfigId) throw new Error('server/agent.json has no configId, so the live corpus cannot be protected. Nothing was deleted');
+  const linkedIds = new Set();
+  let liveSeen = false;
+  let liveLinks = 0;
+  for await (const intellect of io.intellects()) {
+    const isLive = String(intellect.id) === String(liveConfigId);
+    liveSeen ||= isLive;
+    const { knowledgeIds = [] } = (await io.getLinkage(intellect.id)) || {};
+    for (const id of knowledgeIds) {
+      const record = await io.getRecord(id);
+      if (!Array.isArray(record?.config?.sources)) throw new Error(`knowledge record ${id} has no sources, so its categories are unknown. Nothing was deleted`);
+      for (const s of record.config.sources) {
+        for (const c of (s.categoryIds || []).map(Number).filter(Number.isFinite)) {
+          linkedIds.add(c);
+          if (isLive) liveLinks++;
+        }
+      }
+    }
+  }
+  if (!liveSeen) throw new Error(`the live intellect ${liveConfigId} is not in the intellect list. Nothing was deleted`);
+  if (!liveLinks) throw new Error(`the live intellect ${liveConfigId} links no knowledge category. Nothing was deleted`);
+
+  const stale = staleKnowledgeCategories(await io.categories(), linkedIds, before);
+  const withEntries = [];
+  for (const c of stale) withEntries.push({ id: c.id, entries: await io.categoryEntries(Number(c.id)) });
+  const plan = planCategoryPrune(withEntries, linkedIds, before);
+  // A listing at the cap may hide entries. Delete what was seen and keep the category for the next run.
+  const capped = new Set(withEntries.filter((c) => c.entries.length >= LIST_CAP).map((c) => Number(c.id)));
+  return {
+    linkedIds,
+    entryIds: plan.entryIds,
+    categoryIds: plan.categoryIds.filter((id) => !capped.has(id)),
+    keptCategoryIds: plan.keptCategoryIds,
+    cappedCategoryIds: plan.categoryIds.filter((id) => capped.has(id)),
+    stray: await io.strays(before),
+  };
+}
+
 /** `--prune-orphans`: delete the Nova knowledge entries and categories nothing links any more.
  * Dry run lists the counts and deletes nothing. */
 async function pruneOrphans({ dryRun }) {
-  const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision' });
+  const saved = JSON.parse(await readFile(OUT, 'utf8').catch(() => '{}'));
+  const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision', ttlSeconds: PRUNE_TOKEN_TTL_S });
   const before = await ovp(admin, 'system', 'getTime') - PRUNE_MIN_AGE_S;
-
-  const linkedIds = new Set();
-  for await (const intellect of kaltura.intellects.list(admin)) {
-    const { knowledgeIds } = await kaltura.knowledge.getLinkage(intellect.id, admin);
-    for (const id of knowledgeIds) {
-      const record = await kaltura.knowledge.getRecord(id, admin);
-      for (const s of record?.config?.sources || []) (s.categoryIds || []).map(Number).filter(Number.isFinite).forEach((c) => linkedIds.add(c));
-    }
+  const io = {
+    intellects: () => kaltura.intellects.list(admin),
+    getLinkage: (id) => kaltura.knowledge.getLinkage(id, admin),
+    getRecord: (id) => kaltura.knowledge.getRecord(id, admin),
+    async categories() {
+      const rows = [];
+      for (let pageIndex = 1; ; pageIndex++) {
+        const { objects = [] } = await ovp(admin, 'category', 'list', {
+          filter: { objectType: 'KalturaCategoryFilter', nameOrReferenceIdStartsWith: `${TAG}-knowledge-` },
+          pager: { objectType: 'KalturaFilterPager', pageSize: LIST_PAGE, pageIndex },
+        });
+        rows.push(...objects);
+        if (objects.length < LIST_PAGE) return rows;
+      }
+    },
+    async categoryEntries(id) {
+      const entries = [];
+      for await (const e of kaltura.knowledge.listCategoryEntries(id, admin, { pageSize: LIST_PAGE })) entries.push(e);
+      return entries;
+    },
+    strays: (b) => findStrayEntries((filter, pager) => ovp(admin, 'baseentry', 'list', { filter, pager }), { before: b }),
+  };
+  let plan;
+  try {
+    plan = await buildPrunePlan(io, { before, liveConfigId: saved.configId });
+  } catch (err) {
+    console.error(`✗ ${err.message}`);
+    process.exitCode = 1;
+    return;
   }
-  const rows = [];
-  for (let pageIndex = 1; ; pageIndex++) {
-    const { objects = [] } = await ovp(admin, 'category', 'list', {
-      filter: { objectType: 'KalturaCategoryFilter', nameOrReferenceIdStartsWith: `${TAG}-knowledge-` },
-      pager: { objectType: 'KalturaFilterPager', pageSize: LIST_PAGE, pageIndex },
-    });
-    rows.push(...objects);
-    if (objects.length < LIST_PAGE) break;
-  }
-  const stale = staleKnowledgeCategories(rows, linkedIds, before);
-  const withEntries = [];
-  for (const c of stale) {
-    const entries = [];
-    for await (const e of kaltura.knowledge.listCategoryEntries(Number(c.id), admin, { pageSize: LIST_PAGE })) entries.push(e);
-    withEntries.push({ id: c.id, entries });
-  }
-  const { entryIds, categoryIds, keptCategoryIds } = planCategoryPrune(withEntries, linkedIds, before);
-  const stray = await findStrayEntries((filter, pager) => ovp(admin, 'baseentry', 'list', { filter, pager }), { before });
-
-  console.log(`${dryRun ? '(dry run) would delete' : 'deleting'}: ${categoryIds.length} unlinked categor${categoryIds.length === 1 ? 'y' : 'ies'}, ${entryIds.length} entries from the unlinked categories, and ${stray.length} entries that are in no category. Linked categories kept: ${[...linkedIds].join(',') || 'none'}`);
-  if (keptCategoryIds.length) console.log(`  kept categor${keptCategoryIds.length === 1 ? 'y' : 'ies'} ${keptCategoryIds.join(',')}: an entry is under an hour old. Run again later`);
+  const { linkedIds, entryIds, categoryIds, keptCategoryIds, cappedCategoryIds, stray } = plan;
+  const plural = (n) => (n === 1 ? 'y' : 'ies');
+  console.log(`${dryRun ? '(dry run) would delete' : 'deleting'}: ${categoryIds.length} unlinked categor${plural(categoryIds.length)}, ${entryIds.length} entries from the unlinked categories, and ${stray.length} entries that are in no category. Linked categories kept: ${[...linkedIds].join(',') || 'none'}`);
+  if (keptCategoryIds.length) console.log(`  kept categor${plural(keptCategoryIds.length)} ${keptCategoryIds.join(',')}: an entry is under an hour old. Run again later`);
+  if (cappedCategoryIds.length) console.log(`  kept categor${plural(cappedCategoryIds.length)} ${cappedCategoryIds.join(',')}: ${LIST_CAP} or more entries, so the list may be partial. Run again until none are left`);
   if (dryRun) return;
-  const failures = await deleteKnowledge(admin, { categoryIds, entryIds: [...entryIds, ...stray] });
+  // Strays go first and alone, so one stuck entry cannot block a category delete.
+  const failures = [
+    ...await deleteKnowledge(admin, { entryIds: stray }),
+    ...await deleteKnowledge(admin, { categoryIds, entryIds }),
+  ];
   if (failures.length) { process.exitCode = 1; return; }
-  console.log('✓ pruned');
+  console.log(cappedCategoryIds.length ? '✓ pruned what was listed. Run again to finish the large categories' : '✓ pruned');
 }
 
 export const VERIFY_WAIT_DEFAULT_MIN = 45;
@@ -1652,7 +1709,6 @@ function main() {
     console.error(`✗ unknown flag(s): ${unknown.join(', ')}\n\n${USAGE}`);
     process.exit(1);
   }
-  if (args.includes('--verify-knowledge')) return verifyKnowledge(args);
   if (args.includes('--digest') || args.includes('--digest-plan')) {
     const others = args.filter((a) => a.startsWith('--') && a !== '--digest' && a !== '--digest-plan');
     if (args.includes('--digest') && args.includes('--digest-plan')) {
@@ -1673,6 +1729,7 @@ function main() {
     }
     return pruneOrphans({ dryRun: args.includes('--dry-run') });
   }
+  if (args.includes('--verify-knowledge')) return verifyKnowledge(args);
   if (!args.includes('--cleanup')) {
     if (args.includes('--dry-run') || args.includes('--only')) {
       console.error(`✗ --dry-run/--only only apply with --cleanup or --prune-orphans\n\n${USAGE}`);

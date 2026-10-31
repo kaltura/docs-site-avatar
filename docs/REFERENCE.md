@@ -62,12 +62,12 @@
 | `--digest-plan` | Read-only. Print `create`, `update`, or `unchanged` for each digest object, with names and ids only. Needs `DIGEST_RECIPIENTS` |
 | `--digest` | Create or update the digest objects and record their ids in `server/agent.json`. Idempotent. Needs `DIGEST_RECIPIENTS` |
 | `--cleanup` | Delete the agent, avatar, and intellect recorded in `server/agent.json`, plus the entries and category of the corpus the intellect links (discovered live). The knowledge record itself stays |
-| `--prune-orphans` | Delete knowledge entries that sit in no category, and unlinked `docs-site-avatar-knowledge-*` categories with their entries. Keeps anything an intellect links and anything under an hour old. Runs alone, or with `--dry-run` |
+| `--prune-orphans` | Delete `docs-site-avatar-*` document entries that sit in no category, and unlinked `docs-site-avatar-knowledge-*` categories with their entries. Keeps anything an intellect links and anything under an hour old. Exits non-zero with no delete if the intellect in `server/agent.json` is not listed or links no category. Keeps a category with 10,000 or more entries until a later run. Runs alone, or with `--dry-run` |
 | `--dry-run` | With `--cleanup`: list what would be deleted and make no API calls. With `--prune-orphans`: print the counts and delete nothing (read calls only) |
 | `--only <types>` | With `--cleanup`: limit to a comma-separated subset of `agent,avatar,intellect,knowledge` |
 | `--help` | Print usage and exit, with no API calls |
 
-`--digest` and `--digest-plan` run alone. Combined with another flag (or with each other) they exit non-zero. An unrecognized `--flag` exits non-zero with usage. `--dry-run` and `--only` outside `--cleanup` (and `--dry-run` outside `--prune-orphans`) also exit non-zero. `--prune-orphans` combined with any other flag but `--dry-run` exits non-zero.
+`--digest` and `--digest-plan` run alone. Combined with another flag (or with each other) they exit non-zero. An unrecognized `--flag` exits non-zero with usage. `--dry-run` and `--only` outside `--cleanup` (and `--dry-run` outside `--prune-orphans`) also exit non-zero. `--prune-orphans` combined with any other flag but `--dry-run` (including `--verify-knowledge`) exits non-zero.
 
 ## `tests/eval/run.mjs` flags
 

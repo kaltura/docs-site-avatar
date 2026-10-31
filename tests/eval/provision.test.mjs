@@ -17,7 +17,7 @@ const {
   targetArgsLine, rewriteTargetMarkup, SIGNUP_LINK_TOOL_NAME, signupLinkTool,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
   chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry, uploadWithoutOrphans,
-  strayUploadIds, staleKnowledgeCategories, findStrayEntries, planCategoryPrune,
+  strayUploadIds, staleKnowledgeCategories, findStrayEntries, planCategoryPrune, buildPrunePlan,
   reportUnconfirmed, reportLeftoverDeletes, failedEntriesProblem, canReuseCorpus, sealNewCorpus,
   multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem, waitForKnowledgeReady, verifyWaitMs,
 } = await import('../../server/provision.mjs');
@@ -1100,4 +1100,50 @@ test('--prune-orphans runs alone, and --dry-run alone still needs --cleanup or -
   assert.notEqual(lone.status, 0);
   assert.match(lone.stderr, /only apply with --cleanup or --prune-orphans/);
   assert.match(run('--help').stdout, /--prune-orphans/);
+  const withVerify = run('--verify-knowledge', '--prune-orphans');
+  assert.notEqual(withVerify.status, 0);
+  assert.match(withVerify.stderr, /--prune-orphans runs alone/);
+});
+
+const pruneIo = (over = {}) => ({
+  intellects: async function* () { yield { id: 10 }; yield { id: 11 }; },
+  getLinkage: async (id) => ({ knowledgeIds: [id * 10] }),
+  getRecord: async (id) => ({ config: { sources: [{ categoryIds: [id === 100 ? 1 : 2] }] } }),
+  categories: async () => [{ id: 1, name: 'docs-site-avatar-knowledge-a', createdAt: 5 }, { id: 3, name: 'docs-site-avatar-knowledge-b', createdAt: 5 }],
+  categoryEntries: async () => [{ id: 'e1', createdAt: 5, categoriesIds: '3' }],
+  strays: async () => ['s1'],
+  ...over,
+});
+
+test('buildPrunePlan: keeps linked categories and plans the unlinked one', async () => {
+  const plan = await buildPrunePlan(pruneIo(), { before: 100, liveConfigId: 10 });
+  assert.deepEqual([...plan.linkedIds].sort(), [1, 2]);
+  assert.deepEqual(plan.categoryIds, [3]);
+  assert.deepEqual(plan.entryIds, ['e1']);
+  assert.deepEqual(plan.stray, ['s1']);
+});
+
+test('buildPrunePlan: fails closed when the live corpus cannot be proven', async () => {
+  const run = (io, liveConfigId = 10) => buildPrunePlan(pruneIo(io), { before: 100, liveConfigId });
+  await assert.rejects(run({}, null), /no configId/);
+  await assert.rejects(run({ intellects: async function* () {} }), /not in the intellect list/);
+  await assert.rejects(run({}, 99), /not in the intellect list/);
+  await assert.rejects(run({ getLinkage: async () => ({}) }), /links no knowledge category/);
+  await assert.rejects(run({ getLinkage: async () => null }), /links no knowledge category/);
+  await assert.rejects(run({ getRecord: async () => ({ config: {} }) }), /has no sources/);
+  await assert.rejects(run({ getRecord: async () => ({ config: { sources: [{}] } }) }), /links no knowledge category/);
+});
+
+test('buildPrunePlan: keeps a category whose entry list hit the cap, but still deletes the entries seen', async () => {
+  const full = Array.from({ length: 10_000 }, (_, i) => ({ id: `e${i}`, createdAt: 5, categoriesIds: '3' }));
+  const plan = await buildPrunePlan(pruneIo({ categoryEntries: async () => full }), { before: 100, liveConfigId: 10 });
+  assert.deepEqual(plan.categoryIds, []);
+  assert.deepEqual(plan.cappedCategoryIds, [3]);
+  assert.equal(plan.entryIds.length, 10_000);
+});
+
+test('findStrayEntries asks for every corpus entry status', async () => {
+  const filters = [];
+  await findStrayEntries(async (filter) => { filters.push(filter); return { objects: [] }; }, { before: 100 });
+  assert.equal(filters[0].statusIn, '-1,-2,0,1,2,7,4');
 });

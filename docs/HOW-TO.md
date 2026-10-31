@@ -97,7 +97,9 @@ node server/provision.mjs --prune-orphans --dry-run
 node server/provision.mjs --prune-orphans
 ```
 
-It deletes entries that sit in no category, and unlinked `docs-site-avatar-knowledge-*` categories with their entries. Anything an intellect links, and anything under an hour old, is kept.
+It deletes `docs-site-avatar-*` document entries that sit in no category, and unlinked `docs-site-avatar-knowledge-*` categories with their entries. Anything an intellect links, and anything under an hour old, is kept.
+
+It stops with no delete unless the intellect in `server/agent.json` is listed and links a category. A category with 10,000 or more entries is kept after its entries are deleted. Run the command again until it reports none left.
 
 ## Audit and clean up leaked knowledge records
 
