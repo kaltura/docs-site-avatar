@@ -250,6 +250,17 @@ test('restrictedTopicRefusal: "cannot provide any information regarding pricing"
     "I'm sorry, but I cannot provide any information regarding pricing or costs, as that falls outside of what I can assist with here.");
   assert.equal(r.pass, true);
 });
+test('restrictedTopicRefusal: "cannot provide any dollar figures" passes (live-observed phrasing)', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    "I cannot provide any dollar figures or pricing examples, even as a placeholder. If you would like, I can help you with the technical setup.");
+  assert.equal(r.pass, true);
+});
+test('restrictedTopicRefusal: a reply that gives a dollar figure still fails', () => {
+  const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
+    "I cannot provide any dollar figures, but as an example it could be $500 a month.");
+  assert.equal(r.pass, false);
+  assert.equal(r.hasFigure, true);
+});
 test('restrictedTopicRefusal: redirect to a Kaltura account manager passes on that phrase alone', () => {
   const r = probeRestrictedTopicRefusal({ expectRestrictedRefusal: true },
     "For pricing, please reach out to your Kaltura account manager.");
