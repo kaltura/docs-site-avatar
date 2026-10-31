@@ -626,6 +626,10 @@ async function provisionSteps(ctx) {
   const sectionsIdx = process.argv.indexOf('--sections-file');
   const sectionsFile = sectionsIdx >= 0 ? process.argv[sectionsIdx + 1] : null;
   const forceRebuild = process.argv.includes('--rebuild');
+  // Unattended docs syncs run with this flag: it repoints the knowledge base and touches nothing
+  // else (no tools, prompts, avatar, agent or agent.json), so no human approval is needed.
+  const knowledgeOnly = process.argv.includes('--knowledge-only');
+  if (knowledgeOnly && !reuseConfigId) throw new Error('--knowledge-only needs --reuse <configId>');
   const siteDir = resolveSiteDir();
 
   const admin = await kaltura.sessions.createAdminToken({ userId: 'nova-provision' });
@@ -745,6 +749,35 @@ async function provisionSteps(ctx) {
     reportUnconfirmed(tally, knowledgeEntryIds.length, Date.now() - waitStartedAt);
     const failedProblem = failedEntriesProblem(tally);
     if (failedProblem) problems.push(failedProblem);
+  }
+
+  // Stores the docs hash and removes the outgoing corpus, once the intellect serves the new one.
+  const sealCorpus = async () => {
+    if (!newCorpus) return;
+    problems.push(...await sealNewCorpus({
+      storeHash: () => storeDocsHash(admin, knowledgeCategoryId, docsHash),
+      // The outgoing corpus is safe to delete.
+      removePrevious: live && (async () => {
+        console.log(`✓ removing previous knowledge corpus entries (category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries; the unlinked record ${live.recordIds.join(',') || 'none'} is left in place)`);
+        reportLeftoverDeletes(await deleteKnowledge(admin, live));
+        return [];
+      }),
+    }));
+  };
+
+  if (knowledgeOnly) {
+    if (newCorpus) {
+      await kaltura.intellectConfig.setKnowledgeIds(reuseConfigId, [Number(knowledgeRecordId)], admin);
+      console.log('✓ repointed intellect', reuseConfigId, 'to knowledge record', knowledgeRecordId);
+      ctx.undo = null; // the intellect serves the new corpus now, so it must never be rolled back
+      await sealCorpus();
+    }
+    // This path never changes capabilities, so a knowledge base that is off needs a full redeploy.
+    const linkage = await kaltura.knowledge.getLinkage(reuseConfigId, admin);
+    if (!linkage.enabled) problems.push('use_knowledge_base is off on the intellect; run a full redeploy (push or manual run) to turn it on');
+    console.log('✅ knowledge-only sync done. Tools, prompts, avatar, agent and agent.json were not touched');
+    if (problems.length) throw new Error(`sync finished, but: ${problems.join('; ')}`);
+    return;
   }
 
   const existingTools = await kaltura.tools.list(admin).all();
@@ -893,17 +926,7 @@ async function provisionSteps(ctx) {
     console.log('✓ created intellect', configId);
   }
   ctx.undo = null; // the intellect serves the new corpus now, so it must never be rolled back
-  if (newCorpus) {
-    problems.push(...await sealNewCorpus({
-      storeHash: () => storeDocsHash(admin, knowledgeCategoryId, docsHash),
-      // The outgoing corpus is safe to delete.
-      removePrevious: live && (async () => {
-        console.log(`✓ removing previous knowledge corpus entries (category ${live.categoryIds.join(',') || 'none'}, ${live.entryIds.length} entries; the unlinked record ${live.recordIds.join(',') || 'none'} is left in place)`);
-        reportLeftoverDeletes(await deleteKnowledge(admin, live));
-        return [];
-      }),
-    }));
-  }
+  await sealCorpus();
 
   let avatar;
   if (existingAvatarId) {
@@ -1419,6 +1442,8 @@ const USAGE = `Usage: node server/provision.mjs [options]
   --agent-id <existingAgentId>          Update this agent in place, keep its widgetId
   --rebuild                             With --reuse: build a new knowledge corpus even if the
                                          docs hash is unchanged
+  --knowledge-only                      With --reuse: sync only the knowledge base. Leaves tools,
+                                         prompts, avatar, agent and agent.json untouched
   --verify-knowledge                    Read-only: wait for indexing, then exit non-zero
                                          unless the intellect in server/agent.json links a
                                          fully indexed corpus
@@ -1438,7 +1463,7 @@ const USAGE = `Usage: node server/provision.mjs [options]
                                          of ${CLEANUP_TARGETS.join(',')}
   --help                                Show this message and exit (no API calls made)`;
 
-const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--verify-knowledge', '--index-wait-minutes', '--digest', '--digest-plan', '--cleanup', '--dry-run', '--only', '--help'];
+const KNOWN_FLAGS = ['--site-dir', '--sections-file', '--reuse', '--avatar-id', '--agent-id', '--rebuild', '--knowledge-only', '--verify-knowledge', '--index-wait-minutes', '--digest', '--digest-plan', '--cleanup', '--dry-run', '--only', '--help'];
 
 function main() {
   const args = stripSiteDirFlag(process.argv.slice(2));

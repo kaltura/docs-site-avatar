@@ -67,6 +67,9 @@ jobs:
           AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
           AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
           REBUILD_FLAG: ${{ inputs.rebuild && '--rebuild' || '' }}
+          # An unattended docs sync repoints the knowledge base only. A push or manual run is
+          # approved by a human and provisions everything.
+          KNOWLEDGE_ONLY_FLAG: ${{ contains(fromJSON('["schedule","repository_dispatch"]'), github.event_name) && '--knowledge-only' || '' }}
           CONFIG_ID: ${{ steps.ids.outputs.config-id }}
           AGENT_ID: ${{ steps.ids.outputs.agent-id }}
           AVATAR_ID: ${{ steps.ids.outputs.avatar-id }}
@@ -76,7 +79,7 @@ jobs:
             --agent-id "$AGENT_ID" \
             --avatar-id "$AVATAR_ID" \
             --site-dir ./site \
-            ${REBUILD_FLAG}
+            ${REBUILD_FLAG} ${KNOWLEDGE_ONLY_FLAG}
 
       - name: Record whether the eval is needed
         env:

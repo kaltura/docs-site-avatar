@@ -55,6 +55,7 @@
 | `--avatar-id <existingAvatarId>` | Skip the preset pick and use this avatar as is |
 | `--agent-id <existingAgentId>` | Update this agent in place, keeping its `widgetId` |
 | `--rebuild` | With `--reuse`: build a new knowledge corpus even if the docs hash is unchanged. The old one is deleted only after the intellect points at the new one |
+| `--knowledge-only` | With `--reuse`: sync only the knowledge base (same corpus swap as above). Tools, prompts, avatar, agent and `server/agent.json` are not touched. Fails if `use_knowledge_base` is off. The nightly and `site-updated` runs use it |
 | `--verify-knowledge` | Read-only. Wait for indexing, then exit non-zero unless the live corpus has a stored docs hash and every entry is indexed. Used by `eval.yml` |
 | `--index-wait-minutes <n>` | With `--verify-knowledge`: how long to wait for indexing. Default 45 |
 | `--digest-plan` | Read-only. Print `create`, `update`, or `unchanged` for each digest object, with names and ids only. Needs `DIGEST_RECIPIENTS` |

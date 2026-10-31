@@ -24,6 +24,12 @@ test('both workflows gate push and manual runs on production, and run docs syncs
   assert.equal(evalWf.match(env)?.[1], 'github.event.workflow_run.event');
 });
 
+test('redeploy.yml: only the unattended events get --knowledge-only', () => {
+  const m = redeploy.match(/^ {10}KNOWLEDGE_ONLY_FLAG: \$\{\{ contains\(fromJSON\('(\[[^']+\])'\), github\.event_name\) && '--knowledge-only' \|\| '' \}\}$/m);
+  assert.deepEqual(JSON.parse(m?.[1] ?? 'null'), ['schedule', 'repository_dispatch']);
+  assert.match(redeploy, /\$\{REBUILD_FLAG\} \$\{KNOWLEDGE_ONLY_FLAG\}/);
+});
+
 test('redeploy.yml: no cross-repo token or secret beyond the two production secrets', () => {
   const secrets = [...redeploy.matchAll(/secrets\.(\w+)/g)].map((m) => m[1]);
   assert.deepEqual([...new Set(secrets)].sort(), ['AGENTIC_ADMIN_SECRET', 'AGENTIC_PARTNER_ID']);
