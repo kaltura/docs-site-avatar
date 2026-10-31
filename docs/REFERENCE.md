@@ -104,7 +104,7 @@ Why they are shaped this way: [ARCHITECTURE.md](ARCHITECTURE.md#about-redeployin
 | Workflow | Trigger | Gate | Secrets read from |
 |---|---|---|---|
 | `ci.yml` | Pull request against `main` (`pull_request`, so it also runs for forks) | None | None |
-| `redeploy.yml` | Push to `server/provision.mjs` on `main`; nightly `schedule`; `repository_dispatch` (`site-updated`); `workflow_dispatch` (`rebuild` input) | `production` environment, required reviewers, for a push or a manual run. `production-nightly`, no reviewers, `main` only, for `schedule` and `repository_dispatch` | Same two secrets in both environments |
+| `redeploy.yml` | Push to `server/provision.mjs` or `scripts/fetch-sdk.mjs` on `main`; nightly `schedule`; `repository_dispatch` (`site-updated`); `workflow_dispatch` (`rebuild` input) | `production` environment, required reviewers, for a push or a manual run. `production-nightly`, no reviewers, `main` only, for `schedule` and `repository_dispatch` | Same two secrets in both environments |
 | `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` (`trials` input) | `production` environment, required reviewers, for a manual run or after a push or manual redeploy. `production-nightly` after a nightly or `site-updated` redeploy | Same two secrets in both environments |
 
 `redeploy.yml` and `eval.yml` need `AGENTIC_PARTNER_ID` and `AGENTIC_ADMIN_SECRET` as secrets in both the `production` and `production-nightly` environments. Setup: [HOW-TO.md](HOW-TO.md#set-up-this-repos-ci-secrets-one-time).

@@ -14,7 +14,7 @@ Take `<configId>` and `<agentId>` from your existing `server/agent.json`. Add `-
 
 ## Redeploy Nova via GitHub Actions
 
-Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` on `main`. The workflow also runs nightly and on a `repository_dispatch` of type `site-updated` (all triggers: [REFERENCE.md](REFERENCE.md#github-actions-workflows)). A push or a manual run waits for a required reviewer on the `production` environment. The nightly run and `site-updated` dispatch run unattended in `production-nightly`. Each runs `provision.mjs --reuse` against the ids in `server/agent.json`. The unattended runs add `--knowledge-only`, so they sync the knowledge base and change nothing else. The knowledge corpus is re-uploaded only when the docs changed (tick **rebuild** to force it). The job commits nothing back and fails if `server/agent.json` drifted. Why the gate exists and why the docs site's deploy does not trigger this automatically: [ARCHITECTURE.md](ARCHITECTURE.md#about-redeploying-and-evaluating-via-github-actions).
+Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` or `scripts/fetch-sdk.mjs` on `main`. The workflow also runs nightly and on a `repository_dispatch` of type `site-updated` (all triggers: [REFERENCE.md](REFERENCE.md#github-actions-workflows)). A push or a manual run waits for a required reviewer on the `production` environment. The nightly run and `site-updated` dispatch run unattended in `production-nightly`. Each runs `provision.mjs --reuse` against the ids in `server/agent.json`. The unattended runs add `--knowledge-only`, so they sync the knowledge base and change nothing else. The knowledge corpus is re-uploaded only when the docs changed (tick **rebuild** to force it). The job commits nothing back and fails if `server/agent.json` drifted. Why the gate exists and why the docs site's deploy does not trigger this automatically: [ARCHITECTURE.md](ARCHITECTURE.md#about-redeploying-and-evaluating-via-github-actions).
 
 Approve the pending deployment from the run's page, or from the notification GitHub sends the reviewers. The run stays queued until someone does, and every later run queues behind it. Approve or cancel a waiting run promptly.
 
@@ -164,4 +164,4 @@ npm run test:eval:unit
 node tests/eval/run.mjs
 ```
 
-To make the new tag the default for everyone, change `DEFAULT_TAG` in `scripts/fetch-sdk.mjs`.
+To make the new tag the default for everyone, change `DEFAULT_TAG` in `scripts/fetch-sdk.mjs`. Nova quotes this tag in her prompt, so a merge that changes that file starts a gated full redeploy, the same as a change to `provision.mjs`.
