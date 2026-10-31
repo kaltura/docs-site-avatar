@@ -941,3 +941,22 @@ test('signup link tool: fire-and-forget client tool with no args, so the model c
 test('signup link tool: the eval persona file uses the same tool name', () => {
   assert.equal(SIGNUP_LINK_TOOL, SIGNUP_LINK_TOOL_NAME);
 });
+
+test('--knowledge-only without --reuse fails before any network call', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, ['server/provision.mjs', '--knowledge-only'], {
+    env: { ...process.env, AGENTIC_PARTNER_ID: '1', AGENTIC_ADMIN_SECRET: 'x' }, encoding: 'utf8', timeout: 20000,
+  });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr + r.stdout, /--knowledge-only needs --reuse/);
+  assert.doesNotMatch(r.stdout, /admin token/);
+});
+
+test('--help lists --knowledge-only', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, ['server/provision.mjs', '--help'], {
+    env: { ...process.env, AGENTIC_PARTNER_ID: '1', AGENTIC_ADMIN_SECRET: 'x' }, encoding: 'utf8',
+  });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /--knowledge-only/);
+});

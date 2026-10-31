@@ -14,9 +14,9 @@ Take `<configId>` and `<agentId>` from your existing `server/agent.json`. Add `-
 
 ## Redeploy Nova via GitHub Actions
 
-Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` on `main`. The workflow also runs nightly and on a `repository_dispatch` of type `site-updated` (all triggers: [REFERENCE.md](REFERENCE.md#github-actions-workflows)). Every trigger waits for a required reviewer on the `production` environment, then runs `provision.mjs --reuse` against the ids in `server/agent.json`. The knowledge corpus is re-uploaded only when the docs changed (tick **rebuild** to force it). The job commits nothing back and fails if `server/agent.json` drifted. Why the gate exists and why the docs site's deploy does not trigger this automatically: [ARCHITECTURE.md](ARCHITECTURE.md#about-redeploying-and-evaluating-via-github-actions).
+Go to this repo's **Actions → Redeploy Nova → Run workflow**, or push a change to `server/provision.mjs` on `main`. The workflow also runs nightly and on a `repository_dispatch` of type `site-updated` (all triggers: [REFERENCE.md](REFERENCE.md#github-actions-workflows)). A push or a manual run waits for a required reviewer on the `production` environment. The nightly run and `site-updated` dispatch run unattended in `production-nightly`. Each runs `provision.mjs --reuse` against the ids in `server/agent.json`. The unattended runs add `--knowledge-only`, so they sync the knowledge base and change nothing else. The knowledge corpus is re-uploaded only when the docs changed (tick **rebuild** to force it). The job commits nothing back and fails if `server/agent.json` drifted. Why the gate exists and why the docs site's deploy does not trigger this automatically: [ARCHITECTURE.md](ARCHITECTURE.md#about-redeploying-and-evaluating-via-github-actions).
 
-Approve the pending deployment from the run's page, or from the notification GitHub sends the reviewers. The run stays queued until someone does. This applies to the nightly run too.
+Approve the pending deployment from the run's page, or from the notification GitHub sends the reviewers. The run stays queued until someone does, and every later run queues behind it. Approve or cancel a waiting run promptly.
 
 To check the live knowledge base without deploying:
 
@@ -41,7 +41,7 @@ Run it again after any change to `server/digest.mjs` or `server/digest-email.htm
 
 ## Run the eval suite in CI
 
-`eval.yml` is queued automatically when `redeploy.yml` completes successfully. It runs in the `production` environment like `redeploy.yml`, so it waits for a required reviewer before it can read `AGENTIC_PARTNER_ID` and `AGENTIC_ADMIN_SECRET`. To run it ad hoc, for a pass^k check without redeploying first, go to **Actions → Eval Nova → Run workflow** and set `trials`. That run needs the same approval. The job summary shows the report, and the full `tests/eval/artifacts/` directory is attached as a 30-day artifact.
+`eval.yml` is queued automatically when `redeploy.yml` completes successfully. After a nightly or `site-updated` redeploy it runs unattended, and only when the knowledge base was rebuilt. After a push or a manual redeploy it waits for a required reviewer on `production`. To run it ad hoc, for a pass^k check without redeploying first, go to **Actions → Eval Nova → Run workflow** and set `trials`. That run needs the same approval. The job summary shows the report, and the full `tests/eval/artifacts/` directory is attached as a 30-day artifact.
 
 ## Validate a provision.mjs change before merge
 
@@ -55,11 +55,10 @@ It never calls the live agent. Run the same three commands locally before you pu
 
 ## Set up this repo's CI secrets (one-time)
 
-`redeploy.yml` and `eval.yml` read `AGENTIC_PARTNER_ID` and `AGENTIC_ADMIN_SECRET` from one GitHub Environment, `production`.
+`redeploy.yml` and `eval.yml` read `AGENTIC_PARTNER_ID` and `AGENTIC_ADMIN_SECRET` from two GitHub Environments with the same two secrets.
 
-1. In Settings → Environments, create (or reuse) an environment named `production`.
-2. Add both values as environment secrets on `production`.
-3. Add required reviewers to `production`. Every job in it queues and waits for one of them, whether the trigger was a push, a `workflow_run`, or a manual `workflow_dispatch`.
+1. In Settings → Environments, create (or reuse) an environment named `production`. Add both values as environment secrets, and add required reviewers. Every job in it queues and waits for one of them.
+2. Create `production-nightly`. Add the same two secrets, add no reviewers, and limit deployment branches to `main`. Nightly and `site-updated` runs use it.
 
 `ci.yml` needs none of this.
 

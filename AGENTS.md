@@ -32,4 +32,4 @@ Every script and flag: [docs/REFERENCE.md](docs/REFERENCE.md).
 
 ## Before opening a PR
 
-Run the first three commands above. They are exactly what `.github/workflows/ci.yml` runs on every PR, and they need no secrets. `redeploy.yml` and `eval.yml` sit behind a GitHub `production` environment with required reviewers. Do not loosen that gate.
+Run the first three commands above. They are exactly what `.github/workflows/ci.yml` runs on every PR, and they need no secrets. `redeploy.yml` and `eval.yml` sit behind a GitHub `production` environment with required reviewers for pushes and manual runs. Do not loosen that gate. Only the nightly and `site-updated` docs syncs (and the eval after them) run unattended, in `production-nightly`, which has no reviewers and only allows `main`. Do not route any other trigger there.

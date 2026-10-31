@@ -6,7 +6,7 @@ on:
     paths:
       - server/provision.mjs
   # Nightly, so a docs deploy reaches the knowledge base within a day. A run whose docs hash
-  # matches skips the upload, so this is cheap. It waits for `production` approval like any run.
+  # matches skips the upload, so this is cheap. It runs unattended in `production-nightly`.
   schedule:
     - cron: '17 3 * * *'
   # Lets the docs site call this workflow right after it deploys (event type: site-updated).
@@ -33,7 +33,11 @@ jobs:
     # indexing wait (INDEX_WAIT_MS, an alert only), then about 5 min to delete the old corpus. A
     # same-hash --reuse run finishes in a few. Budget for the slow path.
     timeout-minutes: 60
-    environment: production
+    # A docs sync (nightly or site-updated) runs unattended in `production-nightly`, which has the
+    # same two secrets, no reviewers and only allows `main`. A push or a manual run keeps the
+    # `production` approval gate. A run left waiting for approval holds the concurrency slot, so
+    # approve or cancel it.
+    environment: ${{ contains(fromJSON('["schedule","repository_dispatch"]'), github.event_name) && 'production-nightly' || 'production' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -63,6 +67,9 @@ jobs:
           AGENTIC_PARTNER_ID: ${{ secrets.AGENTIC_PARTNER_ID }}
           AGENTIC_ADMIN_SECRET: ${{ secrets.AGENTIC_ADMIN_SECRET }}
           REBUILD_FLAG: ${{ inputs.rebuild && '--rebuild' || '' }}
+          # An unattended docs sync repoints the knowledge base only. A push or manual run is
+          # approved by a human and provisions everything.
+          KNOWLEDGE_ONLY_FLAG: ${{ contains(fromJSON('["schedule","repository_dispatch"]'), github.event_name) && '--knowledge-only' || '' }}
           CONFIG_ID: ${{ steps.ids.outputs.config-id }}
           AGENT_ID: ${{ steps.ids.outputs.agent-id }}
           AVATAR_ID: ${{ steps.ids.outputs.avatar-id }}
@@ -72,7 +79,7 @@ jobs:
             --agent-id "$AGENT_ID" \
             --avatar-id "$AVATAR_ID" \
             --site-dir ./site \
-            ${REBUILD_FLAG}
+            ${REBUILD_FLAG} ${KNOWLEDGE_ONLY_FLAG}
 
       - name: Record whether the eval is needed
         env:

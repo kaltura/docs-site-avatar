@@ -17,7 +17,7 @@
 | `server/digest.mjs` | Creates and updates Nova's conversation digest objects (insight settings, email template, lifecycle rules). Run through `provision.mjs --digest` |
 | `server/digest-email.html` | HTML body of the digest email template |
 | `.github/workflows/ci.yml` | CI: offline checks on every pull request, no secrets |
-| `.github/workflows/redeploy.yml` | CI: redeploy Nova in place, gated behind the `production` environment |
+| `.github/workflows/redeploy.yml` | CI: redeploy Nova in place, gated behind the `production` environment (docs syncs run in `production-nightly`) |
 | `.github/workflows/eval.yml` | CI: run the eval suite against whatever `redeploy.yml` most recently produced |
 | `tests/eval/transport.mjs` | Wire layer: record-only `Conversations.stream()` turns, spiral circuit breaker |
 | `tests/eval/chat-transport.mjs` | Wire layer, chat mode: same contract, driven through the SDK's real `KalturaChatSession` |
@@ -55,6 +55,7 @@
 | `--avatar-id <existingAvatarId>` | Skip the preset pick and use this avatar as is |
 | `--agent-id <existingAgentId>` | Update this agent in place, keeping its `widgetId` |
 | `--rebuild` | With `--reuse`: build a new knowledge corpus even if the docs hash is unchanged. The old one is deleted only after the intellect points at the new one |
+| `--knowledge-only` | With `--reuse`: sync only the knowledge base (same corpus swap as above). Tools, prompts, avatar, agent and `server/agent.json` are not touched. Fails if `use_knowledge_base` is off. The nightly and `site-updated` runs use it |
 | `--verify-knowledge` | Read-only. Wait for indexing, then exit non-zero unless the live corpus has a stored docs hash and every entry is indexed. Used by `eval.yml` |
 | `--index-wait-minutes <n>` | With `--verify-knowledge`: how long to wait for indexing. Default 45 |
 | `--digest-plan` | Read-only. Print `create`, `update`, or `unchanged` for each digest object, with names and ids only. Needs `DIGEST_RECIPIENTS` |
@@ -101,10 +102,10 @@ Why they are shaped this way: [ARCHITECTURE.md](ARCHITECTURE.md#about-redeployin
 | Workflow | Trigger | Gate | Secrets read from |
 |---|---|---|---|
 | `ci.yml` | Pull request against `main` (`pull_request`, so it also runs for forks) | None | None |
-| `redeploy.yml` | Push to `server/provision.mjs` on `main`; nightly `schedule`; `repository_dispatch` (`site-updated`); `workflow_dispatch` (`rebuild` input) | `production` environment, required reviewers | `production` environment secrets |
-| `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` (`trials` input) | `production` environment, required reviewers. A `workflow_run` trigger queues the eval, which runs after approval | `production` environment secrets |
+| `redeploy.yml` | Push to `server/provision.mjs` on `main`; nightly `schedule`; `repository_dispatch` (`site-updated`); `workflow_dispatch` (`rebuild` input) | `production` environment, required reviewers, for a push or a manual run. `production-nightly`, no reviewers, `main` only, for `schedule` and `repository_dispatch` | Same two secrets in both environments |
+| `eval.yml` | `redeploy.yml` completing successfully (`workflow_run`); `workflow_dispatch` (`trials` input) | `production` environment, required reviewers, for a manual run or after a push or manual redeploy. `production-nightly` after a nightly or `site-updated` redeploy | Same two secrets in both environments |
 
-`redeploy.yml` and `eval.yml` need `AGENTIC_PARTNER_ID` and `AGENTIC_ADMIN_SECRET` as `production` environment secrets. Setup: [HOW-TO.md](HOW-TO.md#set-up-this-repos-ci-secrets-one-time).
+`redeploy.yml` and `eval.yml` need `AGENTIC_PARTNER_ID` and `AGENTIC_ADMIN_SECRET` as secrets in both the `production` and `production-nightly` environments. Setup: [HOW-TO.md](HOW-TO.md#set-up-this-repos-ci-secrets-one-time).
 
 ## Environment variables
 
