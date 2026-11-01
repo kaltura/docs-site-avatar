@@ -1153,7 +1153,7 @@ test('linkedCategoryId: reads a plain id and the leaf of a path id', () => {
   assert.equal(linkedCategoryId(413), 413);
   assert.equal(linkedCategoryId('408418612>408418622>408418642>408418722'), 408418722);
   assert.ok(Number.isNaN(linkedCategoryId('abc')));
-  assert.ok(Number.isNaN(linkedCategoryId('1>')));
+  for (const bad of ['1>', '1.5', '0', '-1', '9>1.5', '1e3x', '']) assert.ok(Number.isNaN(linkedCategoryId(bad)), bad);
 });
 
 test('buildPrunePlan: a path-style link protects its leaf category', async () => {
@@ -1168,4 +1168,10 @@ test('buildPrunePlan: fails closed on a category link it cannot read', async () 
   await assert.rejects(buildPrunePlan(pruneIo({
     getRecord: async () => ({ config: { sources: [{ categoryIds: ['not-an-id'] }] } }),
   }), { before: 100, liveConfigId: 10 }), /not a category id/);
+});
+
+test('buildPrunePlan: fails closed when categoryIds is not a list', async () => {
+  await assert.rejects(buildPrunePlan(pruneIo({
+    getRecord: async () => ({ config: { sources: [{ categoryIds: '413' }] } }),
+  }), { before: 100, liveConfigId: 10 }), /not a list/);
 });

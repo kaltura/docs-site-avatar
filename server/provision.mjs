@@ -1467,10 +1467,12 @@ export async function findStrayEntries(list, { before, since = LIST_SINCE }) {
 }
 
 /** The category id of a source's `categoryIds` item. Other agents on the partner link a category
- * by its path (`root>child>leaf`), and the id is the last segment. NaN when it is neither. */
+ * by its path (`root>child>leaf`), and the id is the last segment. NaN unless that is a positive
+ * whole number. */
 export function linkedCategoryId(raw) {
   const leaf = String(raw).split('>').pop().trim();
-  return leaf === '' ? NaN : Number(leaf);
+  const id = leaf === '' ? NaN : Number(leaf);
+  return Number.isSafeInteger(id) && id > 0 ? id : NaN;
 }
 
 /** Reads what is linked and what is stale, and returns the delete plan. It throws instead of
@@ -1492,6 +1494,7 @@ export async function buildPrunePlan(io, { before, liveConfigId }) {
       const record = await io.getRecord(id);
       if (!Array.isArray(record?.config?.sources)) throw new Error(`knowledge record ${id} has no sources, so its categories are unknown. Nothing was deleted`);
       for (const s of record.config.sources) {
+        if (s.categoryIds != null && !Array.isArray(s.categoryIds)) throw new Error(`knowledge record ${id} has a categoryIds value that is not a list. Nothing was deleted`);
         for (const raw of s.categoryIds || []) {
           const c = linkedCategoryId(raw);
           if (!Number.isFinite(c)) throw new Error(`knowledge record ${id} links category "${raw}", which is not a category id. Nothing was deleted`);
