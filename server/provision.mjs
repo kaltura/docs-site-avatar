@@ -1466,6 +1466,13 @@ export async function findStrayEntries(list, { before, since = LIST_SINCE }) {
   }
 }
 
+/** The category id of a source's `categoryIds` item. Other agents on the partner link a category
+ * by its path (`root>child>leaf`), and the id is the last segment. NaN when it is neither. */
+export function linkedCategoryId(raw) {
+  const leaf = String(raw).split('>').pop().trim();
+  return leaf === '' ? NaN : Number(leaf);
+}
+
 /** Reads what is linked and what is stale, and returns the delete plan. It throws instead of
  * returning a plan when it cannot prove the live corpus is protected: the live intellect
  * (`liveConfigId`) must be in the list, link at least one record, and that record must name at
@@ -1485,7 +1492,9 @@ export async function buildPrunePlan(io, { before, liveConfigId }) {
       const record = await io.getRecord(id);
       if (!Array.isArray(record?.config?.sources)) throw new Error(`knowledge record ${id} has no sources, so its categories are unknown. Nothing was deleted`);
       for (const s of record.config.sources) {
-        for (const c of (s.categoryIds || []).map(Number).filter(Number.isFinite)) {
+        for (const raw of s.categoryIds || []) {
+          const c = linkedCategoryId(raw);
+          if (!Number.isFinite(c)) throw new Error(`knowledge record ${id} links category "${raw}", which is not a category id. Nothing was deleted`);
           linkedIds.add(c);
           if (isLive) liveLinks++;
         }

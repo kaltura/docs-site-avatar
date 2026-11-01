@@ -17,7 +17,7 @@ const {
   targetArgsLine, rewriteTargetMarkup, SIGNUP_LINK_TOOL_NAME, signupLinkTool,
   checkCustomPromptSchema, REQUIRED_CUSTOM_PROMPT_KEYS, knowledgeState, entryIndexState, pollEntryStatus, withRollback,
   chunkFormat, findDocMismatch, loadDocContent, isTransientError, withRetry, uploadWithoutOrphans,
-  strayUploadIds, staleKnowledgeCategories, findStrayEntries, planCategoryPrune, buildPrunePlan,
+  strayUploadIds, staleKnowledgeCategories, findStrayEntries, planCategoryPrune, buildPrunePlan, linkedCategoryId,
   reportUnconfirmed, reportLeftoverDeletes, failedEntriesProblem, canReuseCorpus, sealNewCorpus,
   multirequestFailures, summarizeDeleteFailures, deleteKnowledge, knowledgeProblem, waitForKnowledgeReady, verifyWaitMs,
 } = await import('../../server/provision.mjs');
@@ -1146,4 +1146,26 @@ test('findStrayEntries asks for every corpus entry status', async () => {
   const filters = [];
   await findStrayEntries(async (filter) => { filters.push(filter); return { objects: [] }; }, { before: 100 });
   assert.equal(filters[0].statusIn, '-1,-2,0,1,2,7,4');
+});
+
+test('linkedCategoryId: reads a plain id and the leaf of a path id', () => {
+  assert.equal(linkedCategoryId('413'), 413);
+  assert.equal(linkedCategoryId(413), 413);
+  assert.equal(linkedCategoryId('408418612>408418622>408418642>408418722'), 408418722);
+  assert.ok(Number.isNaN(linkedCategoryId('abc')));
+  assert.ok(Number.isNaN(linkedCategoryId('1>')));
+});
+
+test('buildPrunePlan: a path-style link protects its leaf category', async () => {
+  const plan = await buildPrunePlan(pruneIo({
+    getRecord: async (id) => ({ config: { sources: [{ categoryIds: [id === 100 ? '9>1' : 2] }] } }),
+  }), { before: 100, liveConfigId: 10 });
+  assert.ok(plan.linkedIds.has(1), 'category 1 is linked through the path 9>1');
+  assert.ok(!plan.categoryIds.includes(1));
+});
+
+test('buildPrunePlan: fails closed on a category link it cannot read', async () => {
+  await assert.rejects(buildPrunePlan(pruneIo({
+    getRecord: async () => ({ config: { sources: [{ categoryIds: ['not-an-id'] }] } }),
+  }), { before: 100, liveConfigId: 10 }), /not a category id/);
 });
