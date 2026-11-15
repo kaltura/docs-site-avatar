@@ -447,12 +447,12 @@ export function buildPersonas(siteData) {
         {
           prompt: 'My avatar reads "12%" and "Project 720" wrong when it talks. What does the SDK doctor check for that?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['spoken[_ ]text[_ ]digits[_ ]cross[_ ]language', 'spoken[_ ]output[_ ]undeclared', 'respelling', 'speech'],
+          relevanceAny: ['spoken text digits cross language', 'spoken_text_digits_cross_language', 'spoken output undeclared', 'respelling', 'speech'],
         },
         {
           prompt: 'Does the doctor tell me which text-to-speech model my voice uses?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['not (?:its|the) speech model', "(?:doesn't|does not|cannot|can't|can not) (?:show|see|tell|read|expose)", 'not visible', 'only (?:the )?provider', 'provider and language'],
+          relevanceAll: ["(?:doesn't|does not|cannot|can't|can not|not) (?:\\w+ )?(?:show|see|tell|identify|read|expose|visible)"],
         },
         {
           prompt: 'How do I check that my agent never writes raw terms like EBITDA in its replies?',
@@ -462,7 +462,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Should I respell CAGR as "KAY-ger" with hyphens and capitals so the voice says it right?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAny: ['no hyphens?', 'without hyphens?', 'plain lowercase', 'kay ger', 'spelled out', 'stutter', 'respelling[_ ]hyphen[_ ]or[_ ]mixed[_ ]case'],
+          relevanceAny: ['no hyphens', 'without hyphens', 'plain lowercase', 'lowercase', 'kay ger', 'spelled out', 'stutter', 'respelling hyphen or mixed case'],
         },
       ],
     },
