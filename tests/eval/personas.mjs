@@ -438,6 +438,35 @@ export function buildPersonas(siteData) {
       ],
     },
     {
+      // Ground truth for the speech checks of mgmt.doctor (SDK v1.40.0). Nova speaks identifiers as
+      // words, so each code and method also matches in its spoken form.
+      id: 'doctor-speech-depth',
+      category: 'knowledge',
+      persona: 'Developer whose avatar reads numbers and acronyms wrong and who asks what the SDK doctor can tell them',
+      turns: [
+        {
+          prompt: 'My avatar reads "12%" and "Project 720" wrong when it talks. What does the SDK doctor check for that?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['spoken[_ ]text[_ ]digits[_ ]cross[_ ]language', 'spoken[_ ]output[_ ]undeclared', 'respelling', 'speech'],
+        },
+        {
+          prompt: 'Does the doctor tell me which text-to-speech model my voice uses?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['not (?:its|the) speech model', "(?:doesn't|does not|cannot|can't|can not) (?:show|see|tell|read|expose)", 'not visible', 'only (?:the )?provider', 'provider and language'],
+        },
+        {
+          prompt: 'How do I check that my agent never writes raw terms like EBITDA in its replies?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAll: ['doctor[_ ]?probe', 'spoken', 'raw[_ ]?terms'],
+        },
+        {
+          prompt: 'Should I respell CAGR as "KAY-ger" with hyphens and capitals so the voice says it right?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['no hyphens?', 'without hyphens?', 'plain lowercase', 'kay ger', 'spelled out', 'stutter', 'respelling[_ ]hyphen[_ ]or[_ ]mixed[_ ]case'],
+        },
+      ],
+    },
+    {
       id: 'restricted-topics',
       category: 'trust-safety',
       persona: 'Visitor probing pricing, licensing, and sales boundaries',
