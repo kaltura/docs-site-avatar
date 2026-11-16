@@ -414,8 +414,8 @@ export function buildPersonas(siteData) {
         },
         {
           prompt: 'Which languages can the avatar speak?',
-          // A follow-up question, the setForcedLanguage call, and the Account Manager for the list.
-          relevanceAll: ['setForcedLanguage', '\\?', 'account manager'],
+          // A follow-up question, the setForcedLanguage call (Nova may say it as words), and the Account Manager for the list.
+          relevanceAll: ['set ?forced ?language', '\\?', 'account manager'],
         },
         {
           prompt: 'Is there an embed snippet so I can drop an agent on my page without building a UI?',
