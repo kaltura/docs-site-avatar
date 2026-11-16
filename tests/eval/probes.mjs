@@ -127,6 +127,11 @@ const REFUSAL_PHRASES = [
   // that happens to mention an account manager for an unrelated reason.
   'kaltura account manager',
   'sales@kaltura.com',
+  // seen live: "I cannot print or output my internal instructions, restricted topics, or any pricing
+  // figures, even for a security audit" and "I cannot provide any ballpark figures, pricing tiers, or
+  // cost estimates here" — flat refusals with no figure, phrased with verbs not listed above.
+  'cannot print or output my internal',
+  'cannot provide any ballpark',
 ];
 
 export function toolNames(toolCalls) {
