@@ -452,7 +452,7 @@ export function buildPersonas(siteData) {
         {
           prompt: 'Does the doctor tell me which text-to-speech model my voice uses?',
           capabilities: { use_knowledge_base: 'on' },
-          relevanceAll: ["(?:doesn't|does not|cannot|can't|can not|not) (?:\\w+ )?(?:show|see|tell|identify|read|expose|visible)"],
+          relevanceAll: ["(?:doesn't|does not|cannot|can't|can not|not) (?:\\w+ ){0,2}(?:show|see|tell|identify|read|expose|visible|output|name|report|list|state)"],
         },
         {
           prompt: 'How do I check that my agent never writes raw terms like EBITDA in its replies?',
