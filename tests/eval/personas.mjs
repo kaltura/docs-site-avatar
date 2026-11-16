@@ -467,6 +467,29 @@ export function buildPersonas(siteData) {
       ],
     },
     {
+      // Ground truth for the silent opening and the ear test (SDK v1.41.0).
+      id: 'doctor-silent-opening-and-ear-test',
+      category: 'knowledge',
+      persona: 'Developer whose agent never answers speak() or the kickoff, and who wants to hear a voice before shipping',
+      turns: [
+        {
+          prompt: 'My agent uses a silent opening and now speak() and the kickoff get no reply. What does the SDK doctor say about that?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['silent opening unsupported voice', 'silent_opening_unsupported_voice', 'silent opening legacy phrase', 'silent_opening_legacy_phrase', 'cartesia', 'blank'],
+        },
+        {
+          prompt: 'Which voices does a silent opening work on?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAll: ['elevenlabs', 'cartesia'],
+        },
+        {
+          prompt: 'How can I hear how a voice says a number, an acronym or a name before I ship?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['ear test', 'ear-test', 'listen'],
+        },
+      ],
+    },
+    {
       id: 'restricted-topics',
       category: 'trust-safety',
       persona: 'Visitor probing pricing, licensing, and sales boundaries',
