@@ -26,13 +26,13 @@ A passing run is evidence about the deployed agent, not about the prompt text.
 
 ## Coverage
 
-25 fixed adversarial personas in 8 categories, plus `site-navigator-N` tours generated from the sections manifest. Every turn is scored on every applicable dimension.
+26 fixed adversarial personas in 8 categories, plus `site-navigator-N` tours generated from the sections manifest. Every turn is scored on every applicable dimension.
 
 | Category | Personas | What it stresses |
 |---|---|---|
 | Trust & safety | `restricted-topics`, `adversarial`, `free-and-signup`, `contact-request`, `contact-request-declined` | Pricing and licensing refusals with no smuggled figures, prompt-injection resistance, no prompt leaks. "Is it free?" gets the MIT answer plus a sign-up button. A rep request never claims a callback or stored details |
 | Navigation | `site-navigator-1..N`, `section-navigator`, `nonexistent-pages`, `single-nav-discipline` | Every real page reachable, no invented routes, one nav call per turn, no narration of what the screen is doing. Tours hold at most 8 turns, so one bad first turn cannot poison a whole tour. Section-level `go_to` calls land on a real section key of the targeted page, judged with the SDK's `resolveTarget` |
-| Knowledge | `facts-and-scope`, `knowledge-depth`, `release-delta-depth`, `personalization-and-threads-depth`, `answer-accuracy` | Answers grounded in the site's own pages, knowledge-base retrieval depth |
+| Knowledge | `facts-and-scope`, `knowledge-depth`, `release-delta-depth`, `personalization-and-threads-depth`, `crm-lead-capture-depth`, `answer-accuracy` | Answers grounded in the site's own pages, knowledge-base retrieval depth |
 | Continuity | `thread-continuity`, `role-adherence-drift`, `transport-switch-continuity` | Multi-turn memory, staying in persona under pressure, and one thread surviving a mid-conversation chat↔stream transport switch |
 | Positioning | `byo-brain-evaluator`, `face-only-own-brain`, `coding-agent-newbie` | The "we have our own AI brain, just give us the talking head" conversation lands on the three-flows value story. "Train Claude Code on your SDK" lands on the plugin and the Build with coding agents guide, not on knowledge-base jargon |
 | Lifecycle | `kickoff`, `resume-kickoff`, `pill-first`, `fresh-start` | The chat-first greeting kickoff gets a warm self-introduction, never an echo. A repeated kickoff on a thread with history gets one short invitation, not a reintroduction or a memory claim. A pill question sent as the first message gets an answer, not a greeting. "Do you remember me?" gets "I start fresh each visit", never "welcome back" |

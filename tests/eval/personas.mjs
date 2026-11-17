@@ -387,6 +387,48 @@ export function buildPersonas(siteData) {
       ],
     },
     {
+      // Ground truth for the Salesforce Lead and Contact tools (SDK v1.43.0). The wrong answers
+      // are the ones the old recipe invited: treating an id as "saved", putting the key in the URL.
+      id: 'crm-lead-capture-depth',
+      category: 'knowledge',
+      persona: 'Developer wiring Salesforce lead capture into an agent and asking what counts as saved, what fails and where values go',
+      turns: [
+        {
+          prompt: 'Which SDK builder gives my agent a tool that captures a sales lead into Salesforce?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['salesforceleadupsert'],
+        },
+        {
+          prompt: 'The Salesforce tool result has an id but success is false. Was the lead saved?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['not saved', "wasn't saved", 'was not saved', "isn't saved", 'is not saved', "didn't save", 'did not save', 'not count', "doesn't count", 'does not count', 'never treat', "can't treat", 'cannot treat', 'could not save', 'rely on'],
+          // A right answer says success decides it. Saying the id proves a save is the old mistake.
+          relevanceNone: ['yes,? (the )?(lead|record) (was|is) saved', 'the id (means|proves|shows) (it|the lead|the record) (was|is) saved'],
+        },
+        {
+          prompt: 'Two Leads in my org already share one email and a visitor gives me that email. What happens?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['merge', 'delete', 'duplicate'],
+          relevanceNone: ['updates both', 'updates all', 'updates the newest', 'picks the first'],
+        },
+        {
+          prompt: 'Does the visitor\'s email go in the URL or the request body for the Salesforce tool?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['body'],
+        },
+        {
+          prompt: 'Salesforce has no consent field on Lead. Where does the tool record that the visitor agreed to be contacted?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['description'],
+        },
+        {
+          prompt: 'The Salesforce access token expires. What should I do for production?',
+          capabilities: { use_knowledge_base: 'on' },
+          relevanceAny: ['customer endpoint', 'your own endpoint', 'your own https endpoint', 'refresh'],
+        },
+      ],
+    },
+    {
       // Answer-accuracy items from reviewed real conversations (issue #194). Each turn names the
       // known wrong claim in relevanceNone. "Phase 2" is an invented stage name and must never show up.
       id: 'answer-accuracy',
